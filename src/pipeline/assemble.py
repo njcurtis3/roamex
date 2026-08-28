@@ -77,6 +77,11 @@ def _node_for(
     triple: Triple,
 ) -> Node:
     name = resolution.canonical(raw_name) if resolution else raw_name
+    # canonical_id keys on (type, name). Each extraction call sees one block in
+    # isolation, so the same resolved entity can arrive typed differently
+    # across triples — resolution decides the one type it collapses to, or the
+    # merge it just did by name would silently fail to collapse by id too.
+    entity_type = resolution.type_for(name, entity_type) if resolution else entity_type
 
     existing_page = page_by_norm.get(normalize(name))
     if existing_page is not None:

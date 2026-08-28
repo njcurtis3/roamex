@@ -18,6 +18,7 @@ separate. Every default here is biased toward the recoverable error.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 
 from ..llm import prompts
@@ -31,13 +32,28 @@ def normalize(name: str) -> str:
 
 @dataclass
 class ResolutionMap:
-    """name -> canonical name, plus the groups it came from."""
+    """name -> canonical name, plus the groups it came from.
+
+    `types` exists because `models.canonical_id` is deliberately keyed on
+    (type, name) — that is what keeps "Washington" the person distinct from
+    "Washington" the place. But each extraction call sees one block in
+    isolation, so the *same* entity can come back typed `place` in one call and
+    `concept` in another. If resolution only unified the name, those mentions
+    would resolve to the same name but different node ids, and the merge this
+    stage exists to do would silently fail to collapse anything. So this stage
+    now owns type identity too: one canonical type per canonical name, decided
+    by majority vote across every occurrence.
+    """
 
     mapping: dict[str, str] = field(default_factory=dict)
+    types: dict[str, str] = field(default_factory=dict)
     groups: list[dict] = field(default_factory=list)
 
     def canonical(self, name: str) -> str:
         return self.mapping.get(normalize(name), name)
+
+    def type_for(self, canonical_name: str, fallback: str) -> str:
+        return self.types.get(normalize(canonical_name), fallback)
 
 
 def candidate_blocks(names: list[str]) -> list[list[str]]:
@@ -142,14 +158,17 @@ def run(
     model = model or model_for("resolve")
 
     descriptions: dict[str, set[str]] = {}
+    type_votes: dict[str, Counter[str]] = {}
     for t in triples:
-        for name, desc in (
-            (t.subject, t.subject_description),
-            (t.object, t.object_description),
+        for name, desc, entity_type in (
+            (t.subject, t.subject_description, t.subject_type),
+            (t.object, t.object_description, t.object_type),
         ):
-            bucket = descriptions.setdefault(name.strip(), set())
+            name = name.strip()
+            bucket = descriptions.setdefault(name, set())
             if desc:
                 bucket.add(desc)
+            type_votes.setdefault(name, Counter())[entity_type] += 1
 
     result = ResolutionMap()
     for cluster in candidate_blocks(list(descriptions)):
@@ -192,9 +211,21 @@ def run(
 
         for group in groups:
             result.groups.append(group)
+            # One canonical type per canonical name, by majority vote across
+            # every occurrence in the group. Without this, mentions that
+            # resolve merges by NAME can still land on different node ids,
+            # because canonical_id also keys on type — the merge would be
+            # real in resolution.json and silently absent from the graph.
+            votes: Counter[str] = Counter()
+            for member in group["members"]:
+                votes.update(type_votes.get(member, Counter()))
+            if votes:
+                result.types[normalize(group["canonical"])] = votes.most_common(1)[0][0]
             for member in group["members"]:
                 result.mapping[normalize(member)] = group["canonical"]
             if verbose and len(group["members"]) > 1:
                 print(f"  merged {group['members']} -> {group['canonical']}")
+                if len(votes) > 1:
+                    print(f"    type votes {dict(votes)} -> {result.types[normalize(group['canonical'])]}")
 
     return result

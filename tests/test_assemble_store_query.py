@@ -92,6 +92,41 @@ def test_llm_entity_with_no_matching_page_becomes_a_new_node(base, triples):
     assert len(kestrel) == 1 and kestrel[0].type == "tool"
 
 
+def test_resolved_name_with_inconsistent_types_still_collapses_to_one_node(base):
+    """Reproduces a real bug found running roamex on live notes 2026-08-28.
+
+    Each extraction call sees one block in isolation, so the same entity can
+    come back typed `place` in one triple and `concept` in another. Because
+    `canonical_id` keys on (type, name), that alone silently split "Polaris" /
+    "Stella Polaris" into THREE separate nodes even though resolve correctly
+    merged the name. Resolution must decide the type too, or its merges do
+    not actually collapse anything in the graph.
+    """
+    triples = [
+        Triple(subject="Polaris", subject_type="place",
+               predicate="etymology_from", object="Stella Polaris",
+               object_type="concept", provenance=prov()),
+        Triple(subject="Stella Polaris", subject_type="source",
+               predicate="means", object="pole star", object_type="concept",
+               provenance=prov("blk-008")),
+        Triple(subject="Polaris", subject_type="concept",
+               predicate="used_for", object="navigation", object_type="concept",
+               provenance=prov("blk-009")),
+    ]
+    resolution = ResolutionMap(
+        mapping={"polaris": "Stella Polaris", "stella polaris": "Stella Polaris"},
+        types={"stella polaris": "concept"},  # majority vote: 2 concept, 1 place, 1 source
+    )
+    graph = assemble(base, triples, resolution)
+
+    polaris_nodes = [n for n in graph.nodes.values() if "Polaris" in n.name]
+    assert len(polaris_nodes) == 1, (
+        f"expected one merged node, got {len(polaris_nodes)}: "
+        f"{[(n.id, n.type) for n in polaris_nodes]}"
+    )
+    assert polaris_nodes[0].type == "concept"
+
+
 def test_self_edge_from_over_merge_is_dropped(base):
     """If resolution collapses both ends, the "fact" is about nothing."""
     triples = [

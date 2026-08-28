@@ -127,15 +127,25 @@ def cmd_extract(args) -> None:
     triples, failures = extract_stage.run(blocks, model=args.model)
     _dump(TRIPLES, [{**asdict(t)} for t in triples])
     print(f"  {len(triples)} triples from {len(blocks)} blocks, {len(failures)} failures")
+    # Always write, even empty: a stale failures file from a prior broken run
+    # must not sit there looking current next to a clean triples.json.
+    failures_path = WORK / "extract_failures.json"
     if failures:
-        _dump(WORK / "extract_failures.json", failures)
+        _dump(failures_path, failures)
+    elif failures_path.exists():
+        failures_path.unlink()
+        print(f"  removed stale {failures_path}")
 
 
 def cmd_resolve(args) -> None:
     _work()
     triples = _load_triples()
     resolution = resolve_stage.run(triples, model=args.model, use_llm=not args.no_llm)
-    _dump(RESOLUTION, {"mapping": resolution.mapping, "groups": resolution.groups})
+    _dump(RESOLUTION, {
+        "mapping": resolution.mapping,
+        "types": resolution.types,
+        "groups": resolution.groups,
+    })
     merged = [g for g in resolution.groups if len(g["members"]) > 1]
     print(f"  {len(resolution.groups)} groups, {len(merged)} of them merges")
 
@@ -151,7 +161,10 @@ def cmd_assemble(args) -> None:
     if RESOLUTION.exists():
         raw = json.loads(RESOLUTION.read_text(encoding="utf-8"))
         resolution = resolve_stage.ResolutionMap(
-            mapping=raw["mapping"], groups=raw["groups"]
+            mapping=raw["mapping"],
+            # older resolution.json files predate the `types` field
+            types=raw.get("types", {}),
+            groups=raw["groups"],
         )
 
     graph = assemble_stage.assemble(base, triples, resolution)
