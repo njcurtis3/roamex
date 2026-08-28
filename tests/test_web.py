@@ -11,6 +11,7 @@ web/README.md on what that leaves untested.
 """
 
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,12 @@ from src.models import ORIGIN_LLM, Edge, Graph, Node, Provenance, canonical_id
 from src.store.graph import GraphStore
 
 NOW = datetime.now(timezone.utc).isoformat()
+
+
+def _strip_line_comments(js: str) -> str:
+    """Drop `//` comments so a source assertion checks code, not prose about
+    the code — the comment explaining this very bug mentions the API name."""
+    return "\n".join(line.split("//")[0] for line in js.splitlines())
 
 
 def prov(uid="b1", origin=ORIGIN_LLM, quote="Dana runs the data team"):
@@ -111,6 +118,81 @@ def test_index_html_exists_and_declares_its_theme_tokens():
     assert "--paper" in html and "--ink" in html
     assert 'data-theme="dark"' in html
     assert "prefers-color-scheme: dark" in html
+
+
+def test_pointer_is_not_captured_on_pointerdown():
+    """Regression, reported 2026-08-28: clicking a structure did nothing.
+
+    setPointerCapture() retargets the compatibility `click` event to the
+    capturing element, so capturing on pointerdown sent every click to the
+    <svg> (which deselects) instead of the structure's own handler. Capture
+    must only be taken once a drag actually starts, inside pointermove.
+    """
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    down = _strip_line_comments(
+        html.split('addEventListener("pointerdown"')[1].split('addEventListener("pointermove"')[0]
+    )
+    assert "setPointerCapture" not in down, (
+        "pointerdown captures the pointer again — this makes every structure unclickable"
+    )
+    move = _strip_line_comments(
+        html.split('addEventListener("pointermove"')[1].split('addEventListener("pointerup"')[0]
+    )
+    assert "setPointerCapture" in move, "a drag outside the svg needs capture once it starts"
+
+
+def test_both_click_handlers_consume_the_drag_suppression_flag():
+    """The structure handler calls stopPropagation, so the svg handler can't
+    be relied on to clear the flag — a drag ending on a structure would
+    otherwise leave it set and swallow the *next* genuine click."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    assert html.count("consumeSuppressedClick()") >= 2
+
+
+DAILY_RE = re.compile(
+    r"^(January|February|March|April|May|June|July|August|September|October"
+    r"|November|December) \d{1,2}(st|nd|rd|th), \d{4}$"
+)
+
+
+@pytest.mark.parametrize("title", [
+    "June 25th, 2021", "March 7th, 2023", "August 1st, 2026", "April 2nd, 2022",
+    "October 3rd, 2021",
+])
+def test_daily_note_titles_are_recognised(title):
+    assert DAILY_RE.match(title)
+
+
+@pytest.mark.parametrize("title", [
+    # All real titles from a live graph. A looser "contains a month name"
+    # test would fold these into the Daily Notes group and effectively hide
+    # them, which is worse than not grouping at all.
+    "Dad's letter on January 7th 2022",   # no comma before the year
+    "Dad's letter on October 22 2021",    # no ordinal suffix
+    "Day 1: June 19",                     # month mid-title
+    "Notes from June 25th, 2021",         # daily-note date, but prefixed
+    "June 25th, 2021 retrospective",      # daily-note date, but suffixed
+])
+def test_pages_that_merely_mention_a_date_are_not_daily_notes(title):
+    assert not DAILY_RE.match(title)
+
+
+def test_index_regex_in_the_page_matches_this_one():
+    """The page builds its regex from a MONTHS array; if that drifts from the
+    pattern asserted above, these tests stop describing the real behaviour."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    assert r"\\d{1,2}(st|nd|rd|th), \\d{4}$" in html
+    for month in ["January", "December"]:
+        assert f'"{month}"' in html
+
+
+def test_daily_notes_sort_by_date_not_alphabetically():
+    """Alphabetical order on daily notes puts April before January, which is
+    nonsense for a date-titled folder."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    js = html.split("function dailyKey")[1].split("const INDEX_CAP")[0]
+    # year dominates, then month, then day
+    assert "10000" in js and "100" in js
 
 
 def test_query_route_is_not_reachable_by_GET():

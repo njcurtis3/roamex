@@ -118,6 +118,13 @@ svg.dragging { cursor: grabbing; }
 }
 .row-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-meta { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+/* Folder header: a shade heavier than its contents, so the fold is legible
+   without adding a second border weight to the index. */
+.row.group { background: var(--face); font-weight: 500; }
+.row.group:hover { background: var(--grid); }
+.row.nested { padding-left: 22px; }
+.row.nested .row-name { color: var(--muted); }
+.row.nested[aria-selected="true"] .row-name { color: var(--paper); }
 
 /* right panel */
 .tabs { display: flex; border-bottom: 1.5px solid var(--ink); }
@@ -390,7 +397,13 @@ function render() {
       g.appendChild(tag);
     }
 
-    g.addEventListener("click", (ev) => { ev.stopPropagation(); select(n.id); });
+    g.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      // stopPropagation means the svg handler won't run to clear this, so
+      // the flag has to be consumed here too.
+      if (consumeSuppressedClick()) return;
+      select(n.id);
+    });
     g.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); select(n.id); }
     });
@@ -439,34 +452,102 @@ function refit() {
 
 /* ---------- index ------------------------------------------------------ */
 
+const MONTHS = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"];
+// Roam's default daily-note title, anchored so it matches ONLY a whole title.
+// Deliberately strict: a loose "contains a month name" test would sweep in
+// real pages like "Dad's letter on January 7th 2022" and "Day 1: June 19",
+// burying them in a folder nobody thinks to open.
+const DAILY_RE = new RegExp(`^(${MONTHS.join("|")}) \\d{1,2}(st|nd|rd|th), \\d{4}$`);
+
+function isDailyNote(n) {
+  return n.type === "page" && DAILY_RE.test(n.name);
+}
+
+/** Sort key for a daily note: the date it names, newest first. Alphabetical
+ *  would be meaningless here — it puts April before January. */
+function dailyKey(name) {
+  const m = name.match(/^(\w+) (\d{1,2})\w\w, (\d{4})$/);
+  if (!m) return 0;
+  return Number(m[3]) * 10000 + (MONTHS.indexOf(m[1]) + 1) * 100 + Number(m[2]);
+}
+
+const INDEX_CAP = 500;
+let dailyOpen = false;
+
+function makeRow(n) {
+  const b = document.createElement("button");
+  b.className = "row";
+  b.setAttribute("aria-selected", String(n.id === selectedId));
+  b.innerHTML = `<span class="row-code"></span>
+    <span class="row-name"></span>
+    <span class="row-meta"></span>`;
+  b.querySelector(".row-code").textContent = CODE[n.type] || "??";
+  b.querySelector(".row-name").textContent = n.name;
+  b.querySelector(".row-meta").textContent = String(n.degree);
+  b.addEventListener("click", () => select(n.id, true));
+  return b;
+}
+
+function capNote(shown, total) {
+  const d = document.createElement("div");
+  d.className = "empty";
+  d.style.padding = "6px 10px";
+  d.textContent = `showing ${shown} of ${total} — use the filter to narrow`;
+  return d;
+}
+
 function renderIndex() {
   const list = $("indexList");
   list.replaceChildren();
   const { nodes } = visibleSets();
   const term = searchTerm.toLowerCase();
-  const rows = nodes
-    .filter(n => !term || n.name.toLowerCase().includes(term) || n.type.includes(term))
-    .sort((a, b) => b.degree - a.degree || a.name.localeCompare(b.name))
-    .slice(0, 400);
+  const matches = nodes.filter(
+    n => !term || n.name.toLowerCase().includes(term) || n.type.includes(term)
+  );
 
-  if (!rows.length) {
+  const daily = matches.filter(isDailyNote)
+    .sort((a, b) => dailyKey(b.name) - dailyKey(a.name));
+  const rest = matches.filter(n => !isDailyNote(n))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+
+  if (!matches.length) {
     const d = document.createElement("div");
     d.className = "empty";
     d.textContent = "nothing matches.";
     list.appendChild(d);
     return;
   }
-  for (const n of rows) {
-    const b = document.createElement("button");
-    b.className = "row";
-    b.setAttribute("aria-selected", String(n.id === selectedId));
-    b.innerHTML = `<span class="row-code">${CODE[n.type] || "??"}</span>
+
+  // Daily notes fold into one group. They're 37% of a real graph's pages and
+  // dilute the index without saying much on their own.
+  if (daily.length) {
+    // A filter that matches inside the folder should open it, or the results
+    // look like they simply aren't there.
+    const open = dailyOpen || (term && daily.length > 0);
+    const head = document.createElement("button");
+    head.className = "row group";
+    head.setAttribute("aria-expanded", String(!!open));
+    head.innerHTML = `<span class="row-code">DN</span>
       <span class="row-name"></span>
-      <span class="row-meta">${n.degree}</span>`;
-    b.querySelector(".row-name").textContent = n.name;
-    b.addEventListener("click", () => select(n.id, true));
-    list.appendChild(b);
+      <span class="row-meta"></span>`;
+    head.querySelector(".row-name").textContent = `${open ? "▾" : "▸"} Daily Notes`;
+    head.querySelector(".row-meta").textContent = String(daily.length);
+    head.addEventListener("click", () => { dailyOpen = !open; renderIndex(); });
+    list.appendChild(head);
+
+    if (open) {
+      for (const n of daily.slice(0, INDEX_CAP)) {
+        const row = makeRow(n);
+        row.classList.add("nested");
+        list.appendChild(row);
+      }
+      if (daily.length > INDEX_CAP) list.appendChild(capNote(INDEX_CAP, daily.length));
+    }
   }
+
+  for (const n of rest.slice(0, INDEX_CAP)) list.appendChild(makeRow(n));
+  if (rest.length > INDEX_CAP) list.appendChild(capNote(INDEX_CAP, rest.length));
 }
 
 /* ---------- detail panel ----------------------------------------------- */
@@ -709,20 +790,43 @@ $("search").addEventListener("input", (e) => { searchTerm = e.target.value; rend
 
 const svg = $("canvas");
 let drag = null;
+const DRAG_THRESHOLD = 4;   // px of movement before a press counts as a pan
+// Set when a pan ends, consumed by whichever click handler fires next.
+let suppressClick = false;
+function consumeSuppressedClick() {
+  if (!suppressClick) return false;
+  suppressClick = false;
+  return true;
+}
 svg.addEventListener("pointerdown", (e) => {
-  drag = { x: e.clientX, y: e.clientY, vx: VIEW.x, vy: VIEW.y };
-  svg.classList.add("dragging");
-  svg.setPointerCapture(e.pointerId);
+  // Deliberately NOT capturing the pointer here. setPointerCapture()
+  // retargets the compatibility `click` event to the capturing element, so
+  // capturing on pointerdown sends every click to the <svg> instead of the
+  // structure that was actually clicked — which made every node unclickable.
+  // Capture is taken below, only once a real drag starts.
+  drag = { x: e.clientX, y: e.clientY, vx: VIEW.x, vy: VIEW.y, moved: false };
 });
 svg.addEventListener("pointermove", (e) => {
   if (!drag) return;
-  VIEW.x = drag.vx + (e.clientX - drag.x);
-  VIEW.y = drag.vy + (e.clientY - drag.y);
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  // A few pixels of jitter between press and release is a click, not a drag.
+  if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+  if (!drag.moved) {
+    drag.moved = true;
+    svg.classList.add("dragging");
+    try { svg.setPointerCapture(e.pointerId); } catch (err) { /* not capturable */ }
+  }
+  VIEW.x = drag.vx + dx;
+  VIEW.y = drag.vy + dy;
   applyTransform();
 });
 svg.addEventListener("pointerup", (e) => {
-  drag = null; svg.classList.remove("dragging");
-  try { svg.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
+  // A drag ends with a click event too; swallow that one so releasing a pan
+  // over empty space doesn't deselect, or over a structure doesn't select.
+  if (drag && drag.moved) suppressClick = true;
+  drag = null;
+  svg.classList.remove("dragging");
+  try { svg.releasePointerCapture(e.pointerId); } catch (err) { /* never captured */ }
 });
 svg.addEventListener("wheel", (e) => {
   e.preventDefault();
@@ -744,6 +848,7 @@ svg.addEventListener("wheel", (e) => {
   if (crossedLabelThreshold) render();
 }, { passive: false });
 svg.addEventListener("click", () => {
+  if (consumeSuppressedClick()) return;
   if (selectedId) { selectedId = null; renderIndex(); render(); renderEmptyDetail(); }
 });
 
