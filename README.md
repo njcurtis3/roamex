@@ -1,11 +1,12 @@
 # roamex
 
-Turn a Roam Research export into a queryable knowledge graph where every answer cites the
-block it came from.
+Connects to your Roam Research graph over Roam's own API and turns it into a queryable
+knowledge graph where every answer cites the block it came from.
 
-A Roam export is already a graph: pages, blocks, `[[links]]`, `#tags`, `attribute:: value`.
-roamex reads all of that directly and deterministically — no model involved, because running
-one over structure the format already states just makes ground truth fuzzier.
+Your Roam graph is already a graph: pages, blocks, `[[links]]`, `#tags`, `attribute:: value`.
+roamex pulls that structure live and reads it directly and deterministically — no model
+involved, because running one over structure the format already states just makes ground
+truth fuzzier.
 
 The part worth paying for is the second pass. A language model reads the *prose* inside your
 blocks and extracts the relations you stated in a sentence but never linked:
@@ -15,6 +16,14 @@ blocks and extracts the relations you stated in a sentence but never linked:
 No `[[Acme]]`, no `[[Dana]]`, so Roam's own graph shows nothing. roamex turns it into
 `author --works_at--> Acme` and `author --reports_to--> Dana Whitfield`, attached to the pages
 you already keep, each edge stamped with the block uid that produced it.
+
+`pull` fetches your graph live — no browser, no manual export:
+
+```
+$ python -m src.cli pull
+pulling graph 'your-graph' (depth=20)...
+  wrote 1,487 pages to exports/roam.json
+```
 
 Then you can ask it things, and check its work:
 
@@ -37,7 +46,8 @@ citations:
 
 | Stage | What it does | Model? |
 |---|---|---|
-| `parse` | export → base graph from links, tags, attributes | no |
+| `pull` | fetch your graph live from Roam's API | no |
+| `parse` | pulled graph → base graph from links, tags, attributes | no |
 | `extract` | block prose → candidate triples, each quoting its source | yes |
 | `resolve` | "Dana" / "D. Whitfield" / "Dana Whitfield" → one entity | yes, only on ambiguity |
 | `assemble` | fold triples into the base graph, keep all provenance | no |
@@ -57,9 +67,6 @@ python -m src.cli models --match qwen
 Prices are read from OpenRouter at runtime, never hardcoded here.
 
 ## Quick start
-
-The primary way to get data in is a **live pull from Roam's own API** — no manual export
-step, no re-downloading a JSON file every time you want fresher data.
 
 ```bash
 python -m pip install -r requirements.txt
