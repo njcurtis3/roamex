@@ -195,6 +195,50 @@ def test_daily_notes_sort_by_date_not_alphabetically():
     assert "10000" in js and "100" in js
 
 
+def _viewer_codes() -> dict:
+    """Parse the CODE map out of index.html."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    block = html.split("const CODE = {")[1].split("};")[0]
+    return dict(re.findall(r"(\w+):\s*\"(\w+)\"", block))
+
+
+def test_every_extractor_type_has_a_code_in_the_viewer():
+    """`ENTITY_TYPES` in prompts.py is the vocabulary the model chooses from.
+    A type there with no code renders as `??` in the index with no legend
+    entry — silently, since nothing else notices."""
+    from src.llm.prompts import ENTITY_TYPES
+
+    codes = _viewer_codes()
+    missing = [t for t in ENTITY_TYPES if t not in codes]
+    assert not missing, f"no index code for extractor types: {missing}"
+
+
+def test_codes_are_unique():
+    """Two types sharing a code makes the index ambiguous."""
+    codes = _viewer_codes()
+    assert len(set(codes.values())) == len(codes)
+
+
+def test_every_code_has_a_legend_note():
+    """The legend and the hover tooltip both read TYPE_NOTE; a code without
+    one shows an empty tooltip."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    notes = html.split("const TYPE_NOTE = {")[1].split("};")[0]
+    for t in _viewer_codes():
+        assert f"{t}:" in notes, f"{t} has a code but no legend note"
+
+
+def test_concept_note_admits_it_is_the_fallback_bucket():
+    """extract.py's _valid_type() falls back to `concept` for anything
+    outside the vocabulary, so that count mixes real concepts with
+    extraction misses. The legend should say so rather than let the number
+    read as pure signal."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    notes = html.split("const TYPE_NOTE = {")[1].split("};")[0]
+    note = notes.split("concept:")[1].split("\n")[0]
+    assert "fallback" in note.lower()
+
+
 def test_query_route_is_not_reachable_by_GET():
     """The only route that spends money is POST-only on purpose — a GET
     would let a refresh or a prefetch trigger a model call."""

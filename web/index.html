@@ -257,6 +257,28 @@ const CODE = {
   place: "PL", event: "EV", tool: "TL", source: "SR",
 };
 
+// What each code means, for the legend and the hover tooltip. `page` is the
+// only type that isn't a model judgment — those come straight from Roam's own
+// page titles. `concept` is also extract.py's fallback for any type outside
+// the allowed vocabulary, so it absorbs extraction misses; the tooltip says so
+// rather than letting the count read as pure signal.
+const TYPE_NOTE = {
+  page:    "A real page in your Roam graph. Read from the export, not inferred.",
+  person:  "A person the model found named in your prose.",
+  concept: "An idea or term. Also the fallback when the model returns a type outside the allowed list, so this bucket absorbs misses.",
+  org:     "An organisation or company.",
+  project: "A named piece of work.",
+  place:   "A location, physical or virtual.",
+  event:   "Something that happened, or happens.",
+  tool:    "Software, a service, or an instrument.",
+  source:  "A book, paper, article, or other cited work.",
+};
+const TYPE_ORDER = ["page", "concept", "person", "event", "source", "place", "tool", "org", "project"];
+
+function codeTitle(type) {
+  return `${CODE[type] || "??"} — ${type}\n${TYPE_NOTE[type] || "Unknown type."}`;
+}
+
 let DATA = null;          // {counts, nodes, edges}
 let VIEW = { x: 0, y: 0, k: 1 };
 let selectedId = null;
@@ -347,6 +369,12 @@ function render() {
     g.setAttribute("tabindex", "0");
     g.setAttribute("role", "button");
     g.setAttribute("aria-label", `${n.type}: ${n.name}, ${n.degree} connections`);
+    // SVG tooltips are a <title> child, not a title attribute.
+    const tip = document.createElementNS(SVGNS, "title");
+    tip.textContent =
+      `${n.name}\n${codeTitle(n.type)}\n${n.degree} connection${n.degree === 1 ? "" : "s"}` +
+      `\n${n.origins.includes("roam-link") ? "Written as a link in Roam" : "Inferred by a model from prose"}`;
+    g.appendChild(tip);
 
     const isSel = n.id === selectedId;
     const dim = selectedId && !isSel && !isNeighbour(n.id);
@@ -482,9 +510,13 @@ function makeRow(n) {
   b.innerHTML = `<span class="row-code"></span>
     <span class="row-name"></span>
     <span class="row-meta"></span>`;
-  b.querySelector(".row-code").textContent = CODE[n.type] || "??";
+  const code = b.querySelector(".row-code");
+  code.textContent = CODE[n.type] || "??";
+  code.title = codeTitle(n.type);
   b.querySelector(".row-name").textContent = n.name;
-  b.querySelector(".row-meta").textContent = String(n.degree);
+  const meta = b.querySelector(".row-meta");
+  meta.textContent = String(n.degree);
+  meta.title = `${n.degree} connection${n.degree === 1 ? "" : "s"}`;
   b.addEventListener("click", () => select(n.id, true));
   return b;
 }
@@ -531,8 +563,11 @@ function renderIndex() {
     head.innerHTML = `<span class="row-code">DN</span>
       <span class="row-name"></span>
       <span class="row-meta"></span>`;
+    head.querySelector(".row-code").title =
+      "DN — daily note\nA Roam daily page, titled with its date. Folded here because they're numerous and say little individually.";
     head.querySelector(".row-name").textContent = `${open ? "▾" : "▸"} Daily Notes`;
     head.querySelector(".row-meta").textContent = String(daily.length);
+    head.title = `${daily.length} daily notes — click to ${open ? "collapse" : "expand"}`;
     head.addEventListener("click", () => { dailyOpen = !open; renderIndex(); });
     list.appendChild(head);
 
@@ -584,7 +619,7 @@ function renderDetail(n) {
 
   const origins = [...new Set(n.provenance.map(p => p.origin))];
   const head = document.createElement("div");
-  head.innerHTML = `<div class="eyebrow">${CODE[n.type] || "??"} · ${escapeHtml(n.type)} · pinned</div>`;
+  head.innerHTML = `<div class="eyebrow" title="${escapeHtml(codeTitle(n.type))}">${CODE[n.type] || "??"} · ${escapeHtml(n.type)} · pinned</div>`;
   const h2 = document.createElement("h2");
   h2.textContent = n.name;
   head.appendChild(h2);
@@ -884,7 +919,40 @@ function renderEmptyDetail() {
 
 function renderAbout() {
   const c = DATA.counts || {};
-  $("aboutBody").innerHTML = `
+  const body = $("aboutBody");
+  body.replaceChildren();
+
+  // Counts come from the loaded graph, not a hardcoded list, so the legend
+  // can't drift from what's actually on the map.
+  const byType = {};
+  for (const n of DATA.nodes) byType[n.type] = (byType[n.type] || 0) + 1;
+  const types = [...new Set([...TYPE_ORDER, ...Object.keys(byType)])].filter(t => byType[t]);
+
+  const legendRows = types.map(t => `
+    <tr title="${escapeHtml(TYPE_NOTE[t] || "Unknown type.")}">
+      <td style="padding:2px 8px 2px 0;vertical-align:top">
+        <span class="row-code" style="border-color:var(--ink)">${CODE[t] || "??"}</span>
+      </td>
+      <td style="padding:2px 8px 2px 0;vertical-align:top"><b>${escapeHtml(t)}</b></td>
+      <td style="padding:2px 0;text-align:right;vertical-align:top;color:var(--muted)">${byType[t]}</td>
+    </tr>
+    <tr><td></td><td colspan="2" style="padding:0 0 6px;color:var(--muted);font-size:11px">
+      ${escapeHtml(TYPE_NOTE[t] || "Unknown type.")}
+    </td></tr>`).join("");
+
+  body.innerHTML = `
+    <div class="eyebrow">Legend</div>
+    <h2>Entity types</h2>
+    <p style="color:var(--muted)">The code before each name in the index. Hover any chip to see
+    the same note.</p>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:10px">${legendRows}</table>
+
+    <div class="eyebrow">Reading the map</div>
+    <p><b>Height</b> is how connected an entity is — the busiest stand tallest and sit nearest
+    the centre. <b>A solid outline</b> means <mark>you wrote that link by hand</mark> in Roam.
+    <b>Dashed</b> means a model inferred it from your prose and could quote a block for it.
+    Edges follow the same rule.</p>
+
     <div class="eyebrow">About this view</div>
     <h2>Read-only</h2>
     <p>Served from <code>work/graph.db</code> on <code>127.0.0.1</code>. Nothing here writes
