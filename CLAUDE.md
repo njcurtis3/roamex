@@ -204,7 +204,21 @@ What's still genuinely untested past this 1,000-block sample:
 
 ## The frontend
 
-`web/` was a deliberate placeholder while the pipeline was unvalidated — a UI over output
-nobody had checked was a UI you'd rewrite. That condition no longer holds: `query` now
-returns cited, verified-grounded answers on real data at real scale (see above). Building the
-frontend is the natural next step, not a blocked one. Nothing in `src/` may depend on `web/`.
+`web/` is built (2026-08-28): `python web/serve.py` serves an isometric read-only viewer over
+`work/graph.db`. See `web/README.md` for the design language it follows, its routes, and what
+is and isn't tested. Three constraints that matter here:
+
+- **The dependency runs one way.** `web/serve.py` imports `src.store.graph` and
+  `src.pipeline.query`; **nothing in `src/` may import from `web/`.** The viewer reads the
+  pipeline's own store and query code rather than reimplementing either — a second SQL layer
+  would be a second thing to keep correct. Delete `web/` and the pipeline still runs.
+- **`/api/query` is POST, deliberately.** It is the only route that costs money, and a GET
+  would let a page load, refresh, or browser prefetch trigger a model call.
+  `tests/test_web.py` asserts it never appears in `do_GET`.
+- **Binds `127.0.0.1`, read-only.** Nothing is authenticated and the payload is a personal
+  knowledge base. No route writes to the db or to Roam.
+
+**The rendering is unverified.** The JSON shaping is tested and the isometric layout was
+smoke-tested headless for cell collisions at 2,082 nodes, but the page has never been opened
+in a browser — the Chrome extension was not connected when it was written. Treat visual
+correctness as unproven until someone looks at it.

@@ -157,6 +157,9 @@ measured, and for two known-and-unfixed limitations found running at this scale:
 hub-node artifact in `resolve` (capped, not eliminated) and a redundant double graph-load per
 query (measured at ~10% of query latency, not yet the bottleneck).
 
-The frontend in `web/` is still a placeholder; it gets built once `query` returns answers
-worth looking at, which — at this point — it does. Building it is the natural next step, not
-a blocked one.
+The viewer in `web/` is built: an isometric map of the graph where height encodes how
+connected an entity is, solid outlines are links you wrote and dashed ones are relations a
+model inferred, with every claim traceable to its source block, plus a grounded Ask tab.
+Run it with `python web/serve.py`. Its JSON layer is tested and the layout was
+smoke-tested for collisions at full scale, but **how it looks has not been checked in a
+browser** — see `web/README.md`.
