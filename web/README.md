@@ -65,7 +65,12 @@ can't spend money. A test asserts it never appears in `do_GET`.
 ## What's tested, and what isn't
 
 `tests/test_web.py` covers the JSON shaping against a real temporary store — the part that
-fails silently, since a dropped field renders as a blank rather than an error. It does not
-start a server, and **nothing here tests the rendering**: the isometric layout was
-smoke-tested headless for cell collisions at 2,082 nodes, but how the page actually *looks*
-has not been verified in a browser. If something is visually wrong, that is why.
+fails silently, since a dropped field renders as a blank rather than an error — plus source
+guards for the bugs that have actually bitten (pointer capture, index grouping, type codes).
+It does not start a server.
+
+**Nothing here tests the rendering.** The layout is smoke-tested headless for cell
+collisions at 2,082 nodes, and the page has been confirmed rendering correctly by hand (see
+the screenshot in the top-level README), but nothing catches a visual regression
+automatically. Known rough edge: at full-graph zoom, structure labels in the dense centre
+overlap into noise — zoom in, or use the index.

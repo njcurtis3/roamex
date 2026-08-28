@@ -106,6 +106,37 @@ and because a full run ships your entire knowledge base to a third-party provide
 
 Everything except `pull`, `extract`, `resolve` and `query` runs offline with no key.
 
+## The viewer
+
+```bash
+python web/serve.py          # 127.0.0.1:8790
+```
+
+![The roamex viewer: an index on the left, an isometric map of the graph in the middle, and a detail panel on the right showing every source block behind the selected entity](docs/viewer.png)
+
+Read-only, local, and served straight from `work/graph.db`. Three panes:
+
+**Left — the index.** Every entity, alphabetical, with a two-letter type code and its
+connection count. Daily notes fold into one collapsible group (they're often a third of a
+real graph and say little individually); everything else is listed flat. `/` jumps to the
+filter. Codes are `PG` page · `CO` concept · `PR` person · `EV` event · `SR` source ·
+`PL` place · `TL` tool · `OR` org · `PJ` project — hover any chip, or open **About**, for
+the full legend.
+
+**Middle — the map.** Every entity as an isometric structure. **Height is degree**, so the
+busiest entities stand tallest and sit nearest the centre, and the sparse outer field is the
+long tail — in the shot above, the faint outer diamond is mostly daily notes with a single
+link each. **A solid outline means you wrote that link by hand** in Roam; **dashed means a
+model inferred it** from your prose. Edges follow the same rule. Selecting a structure dims
+everything it doesn't touch. Drag to pan, wheel to zoom, `esc` to deselect.
+
+**Right — three tabs.** *Detail* is what the selected entity says, what refers to it, and
+every source block behind each claim — in the shot, `collective-journaling` is pinned, and
+each of its 121 references names the page, the block uid, and the quoted line. Nothing is
+asserted without a block you can go read. *Ask* runs a grounded question against the whole
+graph and is the only thing here that costs a model call. *About* holds the legend and
+counts.
+
 ## Three things it refuses to do
 
 **Assert what your notes don't say.** An extracted relation must quote the block it came
@@ -157,9 +188,8 @@ measured, and for two known-and-unfixed limitations found running at this scale:
 hub-node artifact in `resolve` (capped, not eliminated) and a redundant double graph-load per
 query (measured at ~10% of query latency, not yet the bottleneck).
 
-The viewer in `web/` is built: an isometric map of the graph where height encodes how
-connected an entity is, solid outlines are links you wrote and dashed ones are relations a
-model inferred, with every claim traceable to its source block, plus a grounded Ask tab.
-Run it with `python web/serve.py`. Its JSON layer is tested and the layout was
-smoke-tested for collisions at full scale, but **how it looks has not been checked in a
-browser** — see `web/README.md`.
+The viewer in `web/` is built and confirmed rendering against the real 2,082-node graph —
+that's the screenshot above. Its JSON layer is tested and the layout is collision-free at
+full scale. One known rough edge visible in that shot: at full-graph zoom the structure
+labels in the dense centre overlap into noise. Zooming in resolves them, and the index and
+detail panel are the reliable way to read a specific entity.

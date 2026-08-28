@@ -218,7 +218,9 @@ is and isn't tested. Three constraints that matter here:
 - **Binds `127.0.0.1`, read-only.** Nothing is authenticated and the payload is a personal
   knowledge base. No route writes to the db or to Roam.
 
-**The rendering is unverified.** The JSON shaping is tested and the isometric layout was
-smoke-tested headless for cell collisions at 2,082 nodes, but the page has never been opened
-in a browser — the Chrome extension was not connected when it was written. Treat visual
-correctness as unproven until someone looks at it.
+**The rendering has been confirmed by hand, but nothing tests it.** The page was verified
+rendering correctly against the real 2,082-node graph on 2026-08-28 (screenshot in the
+top-level README). The JSON shaping is tested and the layout is collision-free at that scale,
+but no test catches a visual regression — a CSS or SVG mistake will ship silently. Known
+rough edge: at full-graph zoom the structure labels in the dense centre overlap into noise;
+zooming in resolves them, and the index is the reliable way to find a specific entity.
