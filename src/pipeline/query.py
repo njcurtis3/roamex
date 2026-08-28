@@ -146,11 +146,16 @@ def ask(
         sub.edges = sorted(sub.edges, key=lambda e: -e.confidence)[:max_triples]
 
     triples, index = serialize(sub)
+    # See openrouter.py's DEFAULT_MODELS comment: a reasoning-capable model with
+    # too tight a budget spends it all on reasoning and returns nothing — hit
+    # for real on `extract`. query is left able to reason (that is what keeps
+    # multi-hop answers honest instead of pattern-matched), so the fix here is
+    # a wider budget, not reasoning={"enabled": False}.
     completion = complete(
         prompts.QUERY_SYSTEM,
         prompts.QUERY_USER.format(question=question, triples=triples),
         model,
-        max_tokens=2048,
+        max_tokens=3072,
     )
     answer = parse_query_response(completion.text, index, question, completion.model)
     answer.seeds = [sub.nodes[s].name for s in seeds if s in sub.nodes]

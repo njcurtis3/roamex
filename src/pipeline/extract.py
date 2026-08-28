@@ -107,7 +107,13 @@ def run(blocks: list[dict[str, str]], *, model: str | None = None, verbose: bool
             page_title=block["page_title"], text=block["text"]
         )
         try:
-            completion = complete(prompts.EXTRACT_SYSTEM, user, model, max_tokens=2048)
+            completion = complete(
+                prompts.EXTRACT_SYSTEM,
+                user,
+                model,
+                max_tokens=2048,
+                reasoning={"enabled": False},
+            )
             got = parse_extraction_response(
                 completion.text,
                 block_uid=block["uid"],

@@ -31,6 +31,15 @@ API_URL = "https://openrouter.ai/api/v1/chat/completions"
 # `src.cli eval` is how you find out whether a given model is good enough for
 # YOUR notes. Do not trust a cheap model here on the strength of this comment —
 # measure it. Override per stage in .env.
+#
+# GOTCHA, found running the real graph: qwen/qwen3.7-flash is a reasoning
+# model. With no `reasoning` override it spent the entire max_tokens budget on
+# reasoning tokens and returned empty content — 25 of 59 blocks failed, and the
+# rest were truncated JSON. That looked exactly like a broken extractor and was
+# actually a config gap. `extract.run()` now passes `reasoning={"enabled":
+# False}` (1.7s/211 tokens per block vs. 29s/5k). If you swap in another
+# reasoning-capable model for any stage, either pass the same override or raise
+# `max_tokens` enough to leave room for the actual output after reasoning.
 DEFAULT_MODELS = {
     "extract": "qwen/qwen3.7-flash",
     "resolve": "google/gemini-3.6-flash",
@@ -63,6 +72,7 @@ def complete(
     max_tokens: int = 4096,
     timeout: int = 120,
     retries: int = 3,
+    reasoning: dict[str, object] | None = None,
 ) -> Completion:
     """One chat completion.
 
@@ -86,6 +96,8 @@ def complete(
             {"role": "user", "content": user},
         ],
     }
+    if reasoning is not None:
+        payload["reasoning"] = reasoning
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",

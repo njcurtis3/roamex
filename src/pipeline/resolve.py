@@ -169,11 +169,18 @@ def run(
                 indent=2,
             )
             try:
+                # See openrouter.py's DEFAULT_MODELS comment: a reasoning-capable
+                # model with too tight a budget spends it all on reasoning and
+                # returns empty content — hit for real on `extract`. Unlike
+                # extract, this stage is deliberately NOT told to disable
+                # reasoning: judgment is the whole reason resolve is allowed to
+                # be the expensive stage. The budget is widened instead, so
+                # reasoning and the actual JSON both fit.
                 completion = complete(
                     prompts.RESOLVE_SYSTEM,
                     prompts.RESOLVE_USER.format(candidates=payload),
                     model,
-                    max_tokens=1024,
+                    max_tokens=3072,
                 )
                 groups = parse_resolution_response(completion.text, cluster)
             except Exception as exc:
