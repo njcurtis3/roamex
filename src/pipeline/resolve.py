@@ -30,6 +30,23 @@ def normalize(name: str) -> str:
     return " ".join(name.lower().replace(".", " ").replace("-", " ").split())
 
 
+# Found running roamex against a real 1000-block sample 2026-08-28: a single
+# common word ("God", "church", "Christian") acts as a hub in the token-subset
+# blocking rule, bridging otherwise-unrelated names into one component via
+# union-find's transitive closure. One real cluster reached 73 members and its
+# arbitration call predictably overflowed max_tokens with a truncated,
+# unparseable reply — burning a real API call on something structurally
+# guaranteed to fail. It failed CLOSED (no over-merge, every member left
+# unmerged), which is the correct direction, but at zero benefit for real
+# cost. This cap skips the doomed call outright: same safe outcome, no spend,
+# and an honest log line instead of a JSON parse error. It does not fix the
+# root cause (blocking is too permissive around short common-word hubs, and
+# some "entity" names are really whole clauses from extraction) — that is a
+# genuine precision issue in blocking/extraction, left as a known limitation
+# rather than patched under time pressure. See CLAUDE.md § Scale.
+MAX_ARBITRATION_CLUSTER = 25
+
+
 @dataclass
 class ResolutionMap:
     """name -> canonical name, plus the groups it came from.
@@ -179,6 +196,18 @@ def run(
             groups = [{"canonical": canonical, "members": cluster, "reason": "exact"}]
         elif not use_llm:
             groups = [{"canonical": c, "members": [c], "reason": "llm-disabled"} for c in cluster]
+        elif len(cluster) > MAX_ARBITRATION_CLUSTER:
+            # A cluster this large is almost always a blocking hub-node
+            # artifact, not 25+ genuine aliases of one entity. Arbitrating it
+            # would overflow max_tokens and burn a call on a guaranteed
+            # truncation — skip straight to the same safe outcome for free.
+            if verbose:
+                print(
+                    f"  cluster of {len(cluster)} exceeds MAX_ARBITRATION_CLUSTER "
+                    f"({MAX_ARBITRATION_CLUSTER}) — likely a blocking hub-node "
+                    f"artifact, skipping arbitration, left unmerged: {cluster[:5]}..."
+                )
+            groups = [{"canonical": c, "members": [c], "reason": "cluster-too-large"} for c in cluster]
         else:
             payload = json.dumps(
                 [

@@ -122,3 +122,26 @@ def test_type_for_falls_back_when_name_never_seen():
 
     result = ResolutionMap()
     assert result.type_for("Nobody", fallback="concept") == "concept"
+
+
+def test_oversized_cluster_skips_arbitration_without_a_network_call(monkeypatch):
+    """Reproduces a real failure running roamex against a 1000-block sample of
+    live notes 2026-08-28: a single common word ("God", "church") bridged 73
+    otherwise-unrelated names into one blocking cluster via transitive
+    closure, and arbitrating it overflowed max_tokens on a guaranteed
+    truncation, wasting a real API call for the same "left unmerged" outcome
+    this cap now produces for free."""
+    def boom(*a, **kw):
+        raise AssertionError("must not call the network for an oversized cluster")
+
+    monkeypatch.setattr("src.pipeline.resolve.complete", boom)
+
+    # "hub" is a single-word name whose token set is a subset of every
+    # "hub topic N"'s tokens, so the blocking rule unions all of them into
+    # one 30-member component through "hub" as the bridge — the same
+    # mechanism that produced the real 73-member cluster.
+    names = ["hub"] + [f"hub topic {i}" for i in range(29)]
+    triples = [_triple(n, "concept", "p", "unrelated", "concept") for n in names]
+    result = run(triples, use_llm=True)
+    for n in names:
+        assert result.canonical(n) == n, f"{n!r} should be left unmerged, not arbitrated"
