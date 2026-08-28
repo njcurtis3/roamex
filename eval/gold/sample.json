@@ -1,0 +1,58 @@
+{
+  "$comment": "Gold set for fixtures/roam/sample_export.json. Hand-labelled. This is the template for a real gold file — see CLAUDE.md on how to build one for your own subtree without labelling the whole thing.",
+  "extraction": [
+    {
+      "subject": "Dana Whitfield",
+      "predicate": "works_at",
+      "object": "Rivet Labs",
+      "block_uid": "blk-003"
+    },
+    {
+      "subject": "Dana Whitfield",
+      "predicate": "runs",
+      "object": "the data team",
+      "block_uid": "blk-003"
+    },
+    {
+      "subject": "ingestion spec",
+      "predicate": "depends_on",
+      "object": "Kestrel parser",
+      "block_uid": "blk-004"
+    },
+    {
+      "subject": "Dana Whitfield",
+      "predicate": "wrote",
+      "object": "Kestrel parser",
+      "block_uid": "blk-008"
+    },
+    {
+      "subject": "Rivet Labs",
+      "predicate": "builds_tooling_for",
+      "object": "Project Halyard",
+      "block_uid": "blk-009"
+    }
+  ],
+  "resolution": [
+    ["Dana", "D. Whitfield", "Dana Whitfield"],
+    ["Rivet Labs"],
+    ["Kestrel parser", "Kestrel"],
+    ["Project Halyard"]
+  ],
+  "questions": [
+    {
+      "question": "Who wrote the Kestrel parser?",
+      "expects": "Dana Whitfield",
+      "hops": 1
+    },
+    {
+      "question": "What does Rivet Labs have to do with Project Halyard?",
+      "expects": "Rivet Labs builds tooling for Project Halyard",
+      "hops": 2
+    },
+    {
+      "question": "What is Dana Whitfield's home address?",
+      "expects": "insufficient — the graph does not contain this",
+      "hops": 2
+    }
+  ]
+}

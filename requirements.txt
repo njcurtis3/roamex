@@ -1,0 +1,9 @@
+# roamex (Python 3.13).
+# Install:  python -m pip install -r requirements.txt
+#
+# The pipeline itself has NO runtime dependencies. Roam exports are JSON, the
+# store is stdlib sqlite3, and the OpenRouter call is one POST via urllib.
+# That is deliberate: an ingest tool you come back to in a year should still
+# run, and every dependency here is a thing that can stop being installable.
+
+pytest>=8.0    # test runner; see pytest.ini. The whole suite runs offline.

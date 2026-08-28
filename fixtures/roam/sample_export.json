@@ -1,0 +1,66 @@
+[
+  {
+    "title": "Project Halyard",
+    "uid": "page-halyard",
+    "children": [
+      {
+        "uid": "blk-001",
+        "string": "status:: [[Active]]",
+        "children": []
+      },
+      {
+        "uid": "blk-002",
+        "string": "Kicked off with [[Dana Whitfield]] and #[[Rivet Labs]] in March.",
+        "children": [
+          {
+            "uid": "blk-003",
+            "string": "Dana runs the data team at Rivet Labs and has been there since 2019.",
+            "children": []
+          },
+          {
+            "uid": "blk-004",
+            "string": "D. Whitfield sent over the ingestion spec, it depends on the old Kestrel parser.",
+            "children": []
+          }
+        ]
+      },
+      {
+        "uid": "blk-005",
+        "string": "Maybe we should move off Kestrel entirely?",
+        "children": []
+      },
+      {
+        "uid": "blk-006",
+        "string": "ok",
+        "children": []
+      },
+      {
+        "uid": "blk-007",
+        "string": "[[Dana Whitfield]] [[Rivet Labs]]",
+        "children": []
+      }
+    ]
+  },
+  {
+    "title": "Dana Whitfield",
+    "uid": "page-dana",
+    "children": [
+      {
+        "uid": "blk-008",
+        "string": "Met at the [[Hollis Conference]]. She wrote the Kestrel parser originally.",
+        "children": []
+      }
+    ]
+  },
+  {
+    "title": "Rivet Labs",
+    "uid": "page-rivet",
+    "children": [
+      {
+        "uid": "blk-009",
+        "string": "Small shop in Portland. Builds tooling for [[Project Halyard]].",
+        "children": []
+      }
+    ]
+  }
+]

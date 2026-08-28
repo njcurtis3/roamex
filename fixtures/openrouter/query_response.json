@@ -1,0 +1,18 @@
+{
+  "id": "gen-fixture-query",
+  "model": "anthropic/claude-sonnet-4.5",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Here is the answer:\n\n{\n  \"answer\": \"Dana Whitfield works at Rivet Labs, which builds tooling for Project Halyard.\",\n  \"citations\": [\"e1\", \"e2\", \"e99\"],\n  \"sufficient\": true\n}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 340,
+    "completion_tokens": 62
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "gen-fixture-extract",
+  "model": "anthropic/claude-haiku-4.5",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "```json\n[\n  {\n    \"subject\": \"Dana\",\n    \"subject_type\": \"person\",\n    \"predicate\": \"runs\",\n    \"object\": \"the data team\",\n    \"object_type\": \"org\",\n    \"subject_description\": \"colleague on Project Halyard\",\n    \"object_description\": \"team at Rivet Labs\",\n    \"confidence\": 0.9,\n    \"quote\": \"Dana runs the data team at Rivet Labs\"\n  },\n  {\n    \"subject\": \"Dana\",\n    \"subject_type\": \"person\",\n    \"predicate\": \"works_at\",\n    \"object\": \"Rivet Labs\",\n    \"object_type\": \"org\",\n    \"subject_description\": \"colleague on Project Halyard\",\n    \"object_description\": \"small shop in Portland\",\n    \"confidence\": 0.95,\n    \"quote\": \"has been there since 2019\"\n  },\n  {\n    \"subject\": \"Dana\",\n    \"subject_type\": \"person\",\n    \"predicate\": \"founded\",\n    \"object\": \"NASA\",\n    \"object_type\": \"org\",\n    \"subject_description\": \"\",\n    \"object_description\": \"\",\n    \"confidence\": 0.4,\n    \"quote\": \"Dana founded NASA in 1958\"\n  }\n]\n```"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 412,
+    "completion_tokens": 188
+  }
+}

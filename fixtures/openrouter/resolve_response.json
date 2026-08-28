@@ -1,0 +1,18 @@
+{
+  "id": "gen-fixture-resolve",
+  "model": "anthropic/claude-sonnet-4.5",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"groups\": [\n    {\n      \"canonical\": \"Dana Whitfield\",\n      \"members\": [\"Dana\", \"D. Whitfield\", \"Dana Whitfield\"],\n      \"reason\": \"same person; first-name and abbreviated-surname references\"\n    },\n    {\n      \"canonical\": \"Dana Reyes\",\n      \"members\": [\"Dana Reyes\"],\n      \"reason\": \"different person; unrelated description\"\n    }\n  ]\n}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 220,
+    "completion_tokens": 96
+  }
+}

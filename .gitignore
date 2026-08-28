@@ -1,0 +1,32 @@
+# Secrets — never commit
+.env
+
+# YOUR ROAM EXPORT AND EVERYTHING DERIVED FROM IT.
+#
+# This is the whole of a personal knowledge base: names, contacts, health,
+# money, half-formed opinions about people who did not consent to being in a
+# git repo. It is not test data. Keep it out of history — a note committed
+# once is in every clone forever, and rewriting that history is far more work
+# than never committing it.
+#
+# Put exports here; the path is ignored.
+exports/
+*.roam.json
+roam-export*.json
+
+# work/ holds base_graph.json, triples.json, resolution.json and graph.db —
+# all of them derived from your notes, and all reproducible from the export.
+work/
+
+# Generated artifacts
+out/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+node_modules/
+dist/
+
+# Gold sets other than the committed sample are hand-labelled from real notes.
+eval/gold/*.json
+!eval/gold/sample.json
