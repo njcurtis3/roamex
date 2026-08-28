@@ -21,6 +21,7 @@ the note that produced it.
 python -m pip install -r requirements.txt
 cp .env.example .env          # then add your OpenRouter key
 
+python -m src.cli pull    [--out exports/roam.json]              # optional: live pull instead of a manual export
 python -m src.cli pages   --export exports/roam.json            # pick a subtree
 python -m src.cli parse   --export exports/roam.json --subtree "Project X"
 python -m src.cli extract --export exports/roam.json --subtree "Project X" --dry-run
@@ -73,11 +74,38 @@ what it can't ground. That argument does **not** transfer to `resolve`, where no
 downstream can tell a correct merge from a wrong one. If you cheapen that stage, run
 `eval --gold` and read `over_merge_rate` before believing the graph.
 
+## The Roam API integration — status
+
+`python -m src.cli pull` fetches the graph live from `https://api.roamresearch.com` instead
+of a manual browser export, via `src/roam/api.py`. It returns exactly the page/children shape
+`roam.parse.load_export()` reads from a file, so nothing downstream changes — `pull` is a
+second way to produce the input, not a parallel pipeline.
+
+**Read this before trusting it.** The endpoint paths, auth headers (`Authorization: Bearer`
++ `x-authorization: Bearer`), and the peer-redirect handling (Roam's backend 30x-redirects
+the first request for a graph to a dedicated `peer-N.api.roamresearch.com` host, which a
+client that follows redirects automatically will typically hit *without* the auth header —
+this module follows it manually, header intact) came from a community client's published
+source, not Roam's own docs, which sit behind an in-app page nothing outside Roam can reach.
+The Datalog attribute names (`:node/title`, `:block/uid`, `:block/string`, `:block/children`,
+`:block/order`) are corroborated across independent sources. What is **genuinely untested**
+is the exact JSON key spelling a pulled entity serializes to — `convert_pulled_pages()` tries
+several plausible spellings and raises with the real keys if none match, so a wrong
+assumption fails loud on the first live run instead of silently returning an empty or wrong
+graph. **That first live run against real credentials is the actual test of this module** —
+it has never been exercised against a real Roam graph. Treat a clean `pull` run as the
+verification, not this paragraph.
+
+Get `ROAM_API_TOKEN` from your graph's own settings in Roam (an "API tokens" section) — this
+tool cannot generate one for you. `ROAM_GRAPH_NAME` is the graph's name as it appears in its
+URL. Both go in `.env`; see `.env.example`.
+
 ## Architecture
 
 ```
 src/cli.py              entry point; every stage is a subcommand
 src/models.py           Node / Edge / Triple / Provenance — the contract between stages
+src/roam/api.py         OPTIONAL  live pull from Roam's Backend API -> same shape load_export() returns
 src/roam/parse.py       STAGE 1  export -> base graph. Deterministic, no LLM.
 src/pipeline/extract.py STAGE 2  block prose -> candidate triples. LLM.
 src/pipeline/resolve.py STAGE 3  merge duplicate mentions. Blocking + LLM arbitration.

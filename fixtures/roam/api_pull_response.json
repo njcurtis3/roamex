@@ -1,0 +1,39 @@
+{
+  "$comment": "A HYPOTHETICAL shape for what /api/graph/{graph}/q might return for the fetch_graph() query, based on Datomic pull-JSON conventions used in community Roam client examples. This is NOT verified against a live Roam response -- see src/roam/api.py's module docstring. It exists so convert_pulled_pages() has an offline test, not as a claim that this is the real wire format.",
+  "result": [
+    [
+      {
+        "node/title": "Project Halyard",
+        "block/uid": "page-halyard",
+        "block/children": [
+          {
+            "block/uid": "blk-002",
+            "block/string": "Kicked off with [[Dana Whitfield]] in March.",
+            "block/order": 1,
+            "block/children": [
+              {
+                "block/uid": "blk-003",
+                "block/string": "Dana runs the data team.",
+                "block/order": 0,
+                "block/children": []
+              }
+            ]
+          },
+          {
+            "block/uid": "blk-001",
+            "block/string": "status:: [[Active]]",
+            "block/order": 0,
+            "block/children": []
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "node/title": "Dana Whitfield",
+        "block/uid": "page-dana",
+        "block/children": []
+      }
+    ]
+  ]
+}

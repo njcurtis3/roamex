@@ -86,6 +86,16 @@ and because a full run ships your entire knowledge base to a third-party provide
 
 Everything except `extract`, `resolve` and `query` runs offline with no key.
 
+### Getting an export
+
+Two ways to get `exports/roam.json`:
+
+- **Manual**: Roam's own export (JSON, Markdown export won't work) from your graph's menu.
+- **Live**: `python -m src.cli pull` fetches it directly from Roam's Backend API, given
+  `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME` in `.env`. This is newer and less battle-tested than
+  the manual path — see `CLAUDE.md` § The Roam API integration before relying on it for
+  anything you can't easily re-check by hand.
+
 ## Three things it refuses to do
 
 **Assert what your notes don't say.** An extracted relation must quote the block it came

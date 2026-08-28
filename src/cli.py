@@ -5,6 +5,7 @@ back. That is deliberate: extraction costs real money, and a pipeline that
 re-runs it because the query prompt changed is a pipeline you stop using.
 Stages are resumable and independently inspectable.
 
+    python -m src.cli pull       [--out exports/roam.json] [--depth N]
     python -m src.cli pages      --export roam.json
     python -m src.cli parse      --export roam.json --subtree "Some Page"
     python -m src.cli extract    --export roam.json --subtree "Some Page" [--limit N] [--dry-run]
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -31,6 +33,7 @@ from .pipeline import assemble as assemble_stage
 from .pipeline import extract as extract_stage
 from .pipeline import query as query_stage
 from .pipeline import resolve as resolve_stage
+from .roam import api as roam_api
 from .roam import parse as roam_parse
 from .store.graph import GraphStore
 
@@ -62,6 +65,32 @@ def _load_triples() -> list[Triple]:
 
 
 # -- commands -------------------------------------------------------------
+
+
+def cmd_pull(args) -> None:
+    """Fetch the graph from Roam's live API instead of a manual export.
+
+    See roam/api.py's module docstring before trusting this: the endpoint
+    and headers are sourced from a community client, and the exact JSON key
+    format of a pulled entity was never verified against a live graph. This
+    command IS that verification — if it fails, the error should say
+    exactly which assumption broke rather than fail silently.
+    """
+    token = os.environ.get("ROAM_API_TOKEN")
+    graph = os.environ.get("ROAM_GRAPH_NAME")
+    if not token or not graph:
+        sys.exit(
+            "ROAM_API_TOKEN and ROAM_GRAPH_NAME must be set in .env. "
+            "See .env.example."
+        )
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    print(f"pulling graph {graph!r} (depth={args.depth})...")
+    try:
+        count = roam_api.pull_and_save(graph, token, str(out), depth=args.depth)
+    except roam_api.RoamAPIError as exc:
+        sys.exit(f"pull failed: {exc}")
+    print(f"  wrote {count} pages to {out}")
 
 
 def cmd_pages(args) -> None:
@@ -300,6 +329,11 @@ def main(argv: list[str] | None = None) -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(prog="roamex")
     sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("pull", help="fetch the graph from Roam's live API")
+    p.add_argument("--out", default="exports/roam.json")
+    p.add_argument("--depth", type=int, default=roam_api.DEFAULT_DEPTH)
+    p.set_defaults(func=cmd_pull)
 
     p = sub.add_parser("pages", help="list page titles; pick a subtree")
     p.add_argument("--export", required=True)
