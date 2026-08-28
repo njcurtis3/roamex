@@ -34,12 +34,12 @@ python -m src.cli stats
 python -m pytest              # full suite; every test is offline
 ```
 
-`parse`, `assemble`, `stats` and the offline half of `eval` need no key and no network.
+`parse`, `assemble`, `stats`, `models` and the offline half of `eval` need no key.
 `extract`, `resolve` and `query` call OpenRouter.
 
-**Always `--dry-run` before a real `extract`.** It prints the call count and token estimate
-without spending anything. `extract` is one call per qualifying block and is where essentially
-all of this app's cost lives.
+**Always `--dry-run` before a real `extract`.** It prints the call count, token estimate, and
+a live dollar figure for the configured model. `extract` is one call per qualifying block and
+is where essentially all of this app's cost lives.
 
 Deploy: there isn't one. This is a local CLI over local files. If that ever changes it is
 `ops` work behind a human gate, because it would mean putting a personal knowledge base
@@ -47,15 +47,31 @@ somewhere it can be reached.
 
 ## Where the models come from
 
-Model calls go to **OpenRouter** (`src/llm/openrouter.py`), not to a vendor SDK. Day-to-day
-iteration on this repo happens in **OpenCode**, not Claude Code — model choice, tiering, and
-pipeline runs are driven from there. Claude Code scaffolded the repo; it is not the runtime.
+Model calls go to **OpenRouter** (`src/llm/openrouter.py`) over plain HTTP, not to a vendor
+SDK. Day-to-day iteration on this repo happens in **OpenCode**, not Claude Code. Two separate
+model settings that are easy to confuse:
 
-Tiering is per stage and is set in `DEFAULT_MODELS`, overridable per stage via
-`ROAMEX_MODEL_EXTRACT` / `_RESOLVE` / `_QUERY` in `.env`. Spend on judgment, not on volume:
-`extract` reads one block and fills a fixed schema (cheap, high-volume); `resolve` decides
-whether two names are one entity, which is the call that silently corrupts the graph when it
-is wrong (not cheap).
+- **The pipeline's** models — what `extract`/`resolve`/`query` call. Set in `.env` via
+  `ROAMEX_MODEL_EXTRACT` / `_RESOLVE` / `_QUERY`, or per-run with `--model`. Nothing about
+  this depends on which editor or agent you are using.
+- **OpenCode's own** model — the assistant you are chatting with while editing. Configured
+  inside OpenCode, and unrelated to the above.
+
+`python -m src.cli models` prints the live OpenRouter catalog sorted cheapest-first, so the
+repo never hardcodes a price list that goes stale. `--match` filters it.
+
+Tiering is by **verifiability**, not prestige:
+
+| Stage | Volume | Checked afterwards? | Spend |
+|---|---|---|---|
+| `extract` | high | yes — every triple must quote its block | cheap |
+| `resolve` | low | **no** — a bad merge is undetectable later | don't cheapen blindly |
+| `query` | low | partly — citations are validated | middle |
+
+A cheap extractor is affordable precisely because `parse_extraction_response` throws away
+what it can't ground. That argument does **not** transfer to `resolve`, where nothing
+downstream can tell a correct merge from a wrong one. If you cheapen that stage, run
+`eval --gold` and read `over_merge_rate` before believing the graph.
 
 ## Architecture
 
@@ -112,9 +128,13 @@ prompt changed is one you stop using. Stages are resumable and separately inspec
 8. **Prompts are versioned.** `EXTRACT_VERSION` and friends are written into the provenance
    of every fact. Change a prompt, bump its version — that string is the only way to ask
    later whether a prompt change broke extraction.
-9. **Subtree first.** `--subtree` exists because ingesting a whole personal graph on the first
-   run is how you spend a lot of money discovering the schema was wrong. Prove a page, then
-   widen.
+9. **Subtree first — and the reason is no longer money.** At current cheap-model prices the
+   entire 7.4k-block graph extracts for about $0.16, so cost is not the argument. The two
+   arguments that remain are better ones: a bad prompt or a wrong entity schema is much
+   cheaper to find on 59 blocks than on 4,757, and a full run ships ~916k characters of a
+   personal knowledge base — health, family, finances — to a third-party inference provider
+   in one go. Prove the schema on a page you would not mind a stranger reading, then widen
+   deliberately.
 
 ## Scale — what has and has not been established
 

@@ -24,6 +24,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .eval import score
+from .llm import catalog, prompts
 from .llm.openrouter import load_dotenv, model_for
 from .models import Provenance, Triple
 from .pipeline import assemble as assemble_stage
@@ -98,9 +99,27 @@ def cmd_extract(args) -> None:
     if args.dry_run:
         # The cost preview. Look at this before pointing the stage at a real
         # graph — it is the difference between a few cents and a surprise.
+        model = args.model or model_for("extract")
         chars = sum(len(b["text"]) for b in blocks)
-        print(f"  ~{chars:,} chars, ~{chars // 4:,} tokens of block text")
-        print(f"  model: {model_for('extract')}   calls: {len(blocks)}")
+        # Each call also carries the system prompt, which for a short block is
+        # most of the input. Counting only block text understates the bill.
+        system_tokens = len(prompts.EXTRACT_SYSTEM) // 4
+        input_tokens = chars // 4 + system_tokens * len(blocks)
+        print(f"  ~{chars:,} chars of block text; ~{input_tokens:,} input tokens with prompts")
+        print(f"  model: {model}   calls: {len(blocks)}")
+        try:
+            models = catalog.fetch()
+            info = catalog.find(models, model)
+            if info is None:
+                print(f"  !! {model} is not in the OpenRouter catalog — check the id")
+            else:
+                est = catalog.estimate(info, calls=len(blocks), input_tokens=input_tokens)
+                print(
+                    f"  estimated cost: ${est['total_usd']:.4f}"
+                    f"  (in ${est['cost_input_usd']:.4f} + out ${est['cost_output_usd']:.4f})"
+                )
+        except Exception as exc:
+            print(f"  (could not price it: {exc})")
         for b in blocks[:5]:
             print(f"    {b['uid']}: {b['text'][:90]}")
         return
@@ -200,6 +219,37 @@ def cmd_eval(args) -> None:
     _dump(WORK / "eval_report.json", report)
 
 
+def cmd_models(args) -> None:
+    """The live OpenRouter catalog, cheapest first. No API key needed.
+
+    Prices and ids move; this reads them rather than trusting anything written
+    down in this repo. `blended` assumes ~4:1 input:output, the shape of an
+    extraction call.
+    """
+    models = catalog.fetch()
+    if args.match:
+        needle = args.match.lower()
+        rows = [m for m in models if needle in m.id.lower() or needle in m.name.lower()]
+        rows.sort(key=lambda m: m.prompt_per_mtok * 4 + m.completion_per_mtok)
+    else:
+        rows = catalog.cheapest(models, limit=args.limit, include_free=args.free)
+
+    print(f"{len(models)} models available; showing {len(rows)}\n")
+    print(f"{'model id':<48} {'in $/Mtok':>10} {'out $/Mtok':>11} {'context':>9}")
+    print("-" * 82)
+    for m in rows:
+        print(
+            f"{m.id:<48} {m.prompt_per_mtok:>10.4f} {m.completion_per_mtok:>11.4f} {m.context:>9,}"
+        )
+    print(
+        "\nSet one per stage in .env: ROAMEX_MODEL_EXTRACT / _RESOLVE / _QUERY."
+        "\nCheap is fine for `extract` — every triple is quote-checked against its"
+        "\nsource block, so junk is dropped rather than believed. Verify with"
+        "\n`src.cli eval` before trusting a model on `resolve`, where a wrong merge"
+        "\nis silent and unrecoverable."
+    )
+
+
 def cmd_stats(args) -> None:
     if not DB.exists():
         sys.exit(f"{DB} not found — run `assemble` first.")
@@ -275,6 +325,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--gold", default=None)
     p.add_argument("--model", default=None)
     p.set_defaults(func=cmd_eval)
+
+    p = sub.add_parser("models", help="live OpenRouter catalog, cheapest first")
+    p.add_argument("--limit", type=int, default=25)
+    p.add_argument("--match", default=None, help="filter by id or name substring")
+    p.add_argument("--free", action="store_true", help="include $0 models")
+    p.set_defaults(func=cmd_models)
 
     p = sub.add_parser("stats", help="what is in the store")
     p.set_defaults(func=cmd_stats)

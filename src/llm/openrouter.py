@@ -18,14 +18,23 @@ from dataclasses import dataclass
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Tier by job, not by habit. Extraction is high-volume and mechanical — it reads
-# one block and fills a fixed schema. Resolution is low-volume and genuinely
-# judgment-shaped: deciding two names are one entity is the call that, made
-# wrong, silently corrupts the graph. Query has to reason over a subgraph and
-# cite it. Spend accordingly; override any of these in .env.
+# one block and fills a fixed schema, and the pipeline independently verifies
+# every triple it returns by checking the quote against the source block. A
+# cheap model that occasionally writes junk is therefore *affordable* here: the
+# junk gets dropped rather than believed. Resolution is the opposite — low
+# volume, and a wrong call silently welds two entities together with nothing
+# downstream able to detect it. Query has to reason over a subgraph and cite it
+# honestly. Spend accordingly.
+#
+# These are cheap defaults chosen for a first real run. They are a starting
+# point, not a recommendation: `src.cli models` prints the live catalog, and
+# `src.cli eval` is how you find out whether a given model is good enough for
+# YOUR notes. Do not trust a cheap model here on the strength of this comment —
+# measure it. Override per stage in .env.
 DEFAULT_MODELS = {
-    "extract": "anthropic/claude-haiku-4.5",
-    "resolve": "anthropic/claude-sonnet-4.5",
-    "query": "anthropic/claude-sonnet-4.5",
+    "extract": "qwen/qwen3.7-flash",
+    "resolve": "google/gemini-3.6-flash",
+    "query": "google/gemini-3.6-flash",
 }
 
 

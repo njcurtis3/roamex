@@ -44,8 +44,17 @@ citations:
 | `query` | question → k-hop subgraph → answer with citations | yes |
 | `eval` | precision/recall, over-merge rate, provenance coverage | no |
 
-Models are called through [OpenRouter](https://openrouter.ai), tiered per stage — extraction
-is high-volume and mechanical, resolution is low-volume and consequential.
+Models are called through [OpenRouter](https://openrouter.ai), tiered per stage by how
+*checkable* each stage is. Extraction runs on a cheap model because every triple it produces
+must quote its source block or get dropped — junk is discarded, not believed. Resolution is
+the stage to spend on: a wrong merge is silent and unrecoverable.
+
+```bash
+python -m src.cli models              # live catalog, cheapest first
+python -m src.cli models --match qwen
+```
+
+Prices are read from OpenRouter at runtime, never hardcoded here.
 
 ## Quick start
 
@@ -62,8 +71,18 @@ python -m src.cli assemble
 python -m src.cli query "what depends on the old parser?"
 ```
 
-Start with `--subtree`. Ingesting a whole personal graph on the first run is how you spend a
-lot of money discovering the schema was wrong.
+`--dry-run` prices the run against the live catalog before you spend anything:
+
+```
+375 blocks qualify for extraction
+  ~68,134 chars of block text; ~164,033 input tokens with prompts
+  model: qwen/qwen3.7-flash   calls: 375
+  estimated cost: $0.0122  (in $0.0049 + out $0.0073)
+```
+
+Start with `--subtree` anyway. Not for the money — at these prices a 7,000-block graph runs
+for pocket change — but because a wrong prompt is cheaper to find on 59 blocks than on 4,757,
+and because a full run ships your entire knowledge base to a third-party provider in one go.
 
 Everything except `extract`, `resolve` and `query` runs offline with no key.
 
