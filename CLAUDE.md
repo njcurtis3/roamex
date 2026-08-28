@@ -170,19 +170,41 @@ prompt changed is one you stop using. Stages are resumable and separately inspec
 
 ## Scale — what has and has not been established
 
-The pipeline is proven end-to-end on a synthetic three-page fixture. **That is a correctness
-proof, not a capacity plan.** Nothing here has met a real graph yet, and the two things most
-likely to break first are known:
+**Updated 2026-08-28** after running a 1,000-block sample pulled across a real ~1,500-page,
+~7,450-block graph (21% of the full extractable set) — no longer just the synthetic fixture.
+Result: 594 triples extracted with 0 failures, assembled into 2,082 nodes / 3,211 edges with
+100% provenance, `eval` and a `hops=3` query both ran in under a second of retrieval time. The
+full graph has been priced (~$0.16 at current cheap-model rates) but never run end-to-end —
+that is the next real scale test, not this one.
 
-- `GraphStore.load()` reads the entire graph into memory on every call, and `subgraph()` calls
-  it. Fine at thousands of edges; not at a million. The fix when it matters is a recursive CTE
-  in SQL — the schema already supports it.
-- `resolve`'s blocking is O(n²) over unique names. Fine at thousands; not beyond.
+**One real bug found and fixed at this scale**, not present at small-subtree scale: a single
+common word (`God`, `church`, `Christian`) acts as a hub in `resolve`'s token-subset blocking
+rule, bridging otherwise-unrelated names into one component via transitive closure — one real
+cluster reached 73 members and its arbitration call predictably overflowed `max_tokens`. It
+failed safely (no over-merge — every member left unmerged, the correct direction), but wasted
+a real API call on something structurally doomed. `MAX_ARBITRATION_CLUSTER` (25) now skips
+straight to the same safe outcome for free. **This caps the symptom, not the cause**: blocking
+is still too permissive around short common-word hubs, and some "entity" names extraction
+returns are really whole clauses, not entities. Both are genuine precision issues worth their
+own pass, not yet done.
 
-Neither is worth fixing before a measurement says so.
+**One measured, still-fine limitation**: `ask()` calls `GraphStore.load()` twice per query
+(once via `find_seeds`, once via `subgraph()`) — a real redundancy. At 2,082/3,211 scale that
+cost ~0.8s of an 11.5s query, ~90% of which was the model round-trip. Not yet the bottleneck;
+worth fixing when `load()` itself measurably is, alongside the recursive-CTE change already
+noted below.
+
+What's still genuinely untested past this 1,000-block sample:
+- The full graph at ~4,750 extractable blocks — 4.75× this sample, never run.
+- `GraphStore.load()` reading the *whole* graph on every call, at real scale (a million edges,
+  not a few thousand). The fix when it matters is a recursive CTE in SQL — the schema already
+  supports it. Not worth building before a measurement past this session's says so.
+- `resolve`'s blocking is O(n²) over unique names — fine through ~630 (measured this session);
+  unknown beyond that.
 
 ## The frontend
 
-`web/` is a deliberate placeholder. The plan is a graph/query UI, and it is not built,
-because a UI over a pipeline whose output has not been validated is a UI you rewrite. Build
-it once `query` returns answers worth looking at. Nothing in `src/` may depend on `web/`.
+`web/` was a deliberate placeholder while the pipeline was unvalidated — a UI over output
+nobody had checked was a UI you'd rewrite. That condition no longer holds: `query` now
+returns cited, verified-grounded answers on real data at real scale (see above). Building the
+frontend is the natural next step, not a blocked one. Nothing in `src/` may depend on `web/`.

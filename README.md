@@ -58,10 +58,14 @@ Prices are read from OpenRouter at runtime, never hardcoded here.
 
 ## Quick start
 
+The primary way to get data in is a **live pull from Roam's own API** — no manual export
+step, no re-downloading a JSON file every time you want fresher data.
+
 ```bash
 python -m pip install -r requirements.txt
-cp .env.example .env                     # add your OpenRouter key
+cp .env.example .env                     # add your OpenRouter key, ROAM_API_TOKEN, ROAM_GRAPH_NAME
 
+python -m src.cli pull                                        # fetches exports/roam.json live
 python -m src.cli pages   --export exports/roam.json          # find a page to start on
 python -m src.cli parse   --export exports/roam.json --subtree "Project X"
 python -m src.cli extract --export exports/roam.json --subtree "Project X" --dry-run
@@ -71,7 +75,16 @@ python -m src.cli assemble
 python -m src.cli query "what depends on the old parser?"
 ```
 
-`--dry-run` prices the run against the live catalog before you spend anything:
+`ROAM_API_TOKEN` comes from your graph's own settings in Roam (an "API tokens" section);
+`ROAM_GRAPH_NAME` is the graph's name as it appears in its URL. Everything downstream of
+`exports/roam.json` — `pages` through `query` — doesn't know or care whether that file came
+from `pull` or a manual export, so switching between them later costs nothing.
+
+No token yet, or want to try roamex before setting one up? Skip `pull` and drop Roam's own
+export (JSON, not Markdown, from your graph's menu) at `exports/roam.json` instead — same
+file, same shape, every other command works unchanged.
+
+`--dry-run` prices an extraction run against the live catalog before you spend anything:
 
 ```
 375 blocks qualify for extraction
@@ -84,17 +97,7 @@ Start with `--subtree` anyway. Not for the money — at these prices a 7,000-blo
 for pocket change — but because a wrong prompt is cheaper to find on 59 blocks than on 4,757,
 and because a full run ships your entire knowledge base to a third-party provider in one go.
 
-Everything except `extract`, `resolve` and `query` runs offline with no key.
-
-### Getting an export
-
-Two ways to get `exports/roam.json`:
-
-- **Manual**: Roam's own export (JSON, Markdown export won't work) from your graph's menu.
-- **Live**: `python -m src.cli pull` fetches it directly from Roam's Backend API, given
-  `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME` in `.env`. Verified 2026-08-28 against a real graph
-  (0 block-level mismatches vs. a manual export) — see `CLAUDE.md` § The Roam API integration
-  for exactly what that verification did and did not cover.
+Everything except `pull`, `extract`, `resolve` and `query` runs offline with no key.
 
 ## Three things it refuses to do
 
@@ -113,11 +116,13 @@ wasn't in the prompt is flagged, not returned clean.
 
 ## Your notes stay yours
 
-`exports/`, `work/`, and unlabelled gold sets are gitignored — the export, the derived graph,
-the database, all of it. The test fixtures are synthetic, not redacted real notes.
+`exports/`, `work/`, and unlabelled gold sets are gitignored — the export (however it got
+there — `pull` or manual), the derived graph, the database, all of it. The test fixtures are
+synthetic, not redacted real notes.
 
 Block text is sent to whichever model you point OpenRouter at. There's no exclusion filter
-yet; if you need one, it belongs in `blocks_for_extraction`.
+yet; if you need one, it belongs in `blocks_for_extraction`. `pull` sends your Roam API token
+to Roam's own API and nowhere else.
 
 ## Testing
 
@@ -127,10 +132,24 @@ python -m pytest
 
 Every test runs offline. Each LLM stage splits into a `run()` that calls the network and a
 `parse_*_response()` that doesn't; tests only exercise the second, against recorded replies
-in `fixtures/openrouter/`.
+in `fixtures/openrouter/`. `pull` follows the same split — `convert_pulled_pages()` is tested
+offline against a fixture, `RoamClient`'s actual HTTP layer isn't — with one difference worth
+knowing: that fixture's shape was a documented guess until `pull` ran once for real (see
+Status below), not captured from an actual response the way the OpenRouter fixtures were.
 
 ## Status
 
-Proven end-to-end on a synthetic fixture — a correctness proof, not a capacity plan. The
-frontend in `web/` is a placeholder; it gets built once `query` returns answers worth
-looking at. See `CLAUDE.md` for the known scale limits and why they're not fixed yet.
+Proven end-to-end against real data, not just the synthetic fixture: a 1,000-block sample
+pulled from across a real ~1,500-page graph (594 triples extracted, 0 failures), assembled
+into a 2,082-node / 3,211-edge graph with 100% provenance coverage, and queried successfully
+at that scale, including the point where retrieval hits its truncation cap. `pull` itself was
+verified against a live graph with 0 block-level mismatches against a manual export. The full
+graph (~4,750 extractable blocks) has been priced (~$0.16 at current cheap-model rates) but
+not yet run end-to-end — see `CLAUDE.md`'s Scale section for exactly what has and hasn't been
+measured, and for two known-and-unfixed limitations found running at this scale: a blocking
+hub-node artifact in `resolve` (capped, not eliminated) and a redundant double graph-load per
+query (measured at ~10% of query latency, not yet the bottleneck).
+
+The frontend in `web/` is still a placeholder; it gets built once `query` returns answers
+worth looking at, which — at this point — it does. Building it is the natural next step, not
+a blocked one.
