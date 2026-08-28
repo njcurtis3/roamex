@@ -13,6 +13,7 @@ cites an edge it wasn't shown is flagged rather than returned clean.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from ..llm import prompts
@@ -65,11 +66,32 @@ def serialize(graph: Graph) -> tuple[str, dict[str, dict]]:
     return "\n".join(lines), index
 
 
+# Matches ["e1, e7"] or [e1, e7] — a `citations` array where the edge ids came
+# back as bare identifiers instead of quoted strings. Found for real 2026-08-28:
+# query/v1's schema example showed `[edge_id, ...]` with edge_id unquoted, and
+# gemini-3.6-flash pattern-matched the placeholder literally. v2 fixed the
+# prompt; this is defense-in-depth for whatever model repeats the mistake next,
+# scoped to the `citations` array specifically so it can't corrupt `answer`
+# prose that happens to contain a word shaped like an edge id.
+_BARE_CITATION_RE = re.compile(r'("citations"\s*:\s*\[)([^\]]*)(\])')
+_BARE_TOKEN_RE = re.compile(r'(?<!")\b(e\d+)\b(?!")')
+
+
+def _repair_bare_citations(text: str) -> str:
+    def fix_array(m: re.Match) -> str:
+        return m.group(1) + _BARE_TOKEN_RE.sub(r'"\1"', m.group(2)) + m.group(3)
+
+    return _BARE_CITATION_RE.sub(fix_array, text)
+
+
 def parse_query_response(
     raw_text: str, index: dict[str, dict], question: str, model: str
 ) -> Answer:
     """Model reply -> Answer, with citations checked. Pure; no network."""
-    data = extract_json(raw_text)
+    try:
+        data = extract_json(raw_text)
+    except ValueError:
+        data = extract_json(_repair_bare_citations(raw_text))
     if not isinstance(data, dict):
         raise ValueError("expected a JSON object")
 
@@ -148,15 +170,30 @@ def ask(
     triples, index = serialize(sub)
     # See openrouter.py's DEFAULT_MODELS comment: a reasoning-capable model with
     # too tight a budget spends it all on reasoning and returns nothing — hit
-    # for real on `extract`. query is left able to reason (that is what keeps
-    # multi-hop answers honest instead of pattern-matched), so the fix here is
-    # a wider budget, not reasoning={"enabled": False}.
-    completion = complete(
-        prompts.QUERY_SYSTEM,
-        prompts.QUERY_USER.format(question=question, triples=triples),
-        model,
-        max_tokens=3072,
-    )
-    answer = parse_query_response(completion.text, index, question, completion.model)
-    answer.seeds = [sub.nodes[s].name for s in seeds if s in sub.nodes]
+    # for real on `extract`, and again here as truncated JSON when a verbose,
+    # heavily-cited answer plus reasoning outran 3072. query is left able to
+    # reason (that is what keeps multi-hop answers honest instead of
+    # pattern-matched), so the fix is a wider budget, not disabling reasoning.
+    seed_names = [sub.nodes[s].name for s in seeds if s in sub.nodes]
+    try:
+        completion = complete(
+            prompts.QUERY_SYSTEM,
+            prompts.QUERY_USER.format(question=question, triples=triples),
+            model,
+            max_tokens=4096,
+        )
+        answer = parse_query_response(completion.text, index, question, completion.model)
+    except Exception as exc:
+        # extract.run() and resolve.run() both fail closed instead of crashing
+        # their callers; query had no such guard, so a parse error (truncation,
+        # malformed JSON) took down the whole CLI with a stack trace instead of
+        # reporting "the model didn't answer" the way it should.
+        answer = Answer(
+            question=question,
+            answer=f"Query failed: {exc}",
+            sufficient=False,
+            triples_shown=len(index),
+            model=model,
+        )
+    answer.seeds = seed_names
     return answer

@@ -18,6 +18,7 @@ from src.models import (
     Triple,
     canonical_id,
 )
+from src.pipeline import query as query_stage
 from src.pipeline.assemble import assemble, stats
 from src.pipeline.query import parse_query_response, serialize
 from src.pipeline.resolve import ResolutionMap
@@ -204,6 +205,39 @@ def test_serialize_labels_every_triple_with_its_source(base, triples):
         assert "block " in line, f"a triple was shown without provenance: {line}"
 
 
+def test_bare_citation_identifiers_are_repaired_not_rejected():
+    """Reproduces a real reply from gemini-3.6-flash 2026-08-28: valid JSON
+    except `"citations": [e1, e3, e5]` used bare identifiers instead of
+    quoted strings, which is invalid JSON and raised out of every real query
+    before this repair existed. Traced to query/v1's own schema example
+    showing an unquoted `edge_id` placeholder — fixed in query/v2, but the
+    repair stays as defense-in-depth for whatever model repeats it."""
+    raw = (
+        '{\n  "answer": "The graph does not connect these.",\n'
+        '  "citations": [e1, e3, e5],\n  "sufficient": false\n}'
+    )
+    index = {f"e{i}": {"edge_id": f"e{i}", "source": "A", "predicate": "p",
+                        "target": "B", "page_title": "P", "block_uid": "b",
+                        "origin": ORIGIN_LLM, "quote": None} for i in (1, 3, 5)}
+    answer = parse_query_response(raw, index, "q", "m")
+    assert len(answer.citations) == 3
+    assert answer.invalid_citations == []
+
+
+def test_repair_does_not_touch_a_lookalike_word_in_the_answer_prose():
+    """The repair is scoped to the citations array so it can't corrupt prose
+    that happens to contain a token shaped like an edge id."""
+    raw = (
+        '{\n  "answer": "See variable e1 in the source code for context.",\n'
+        '  "citations": ["e1"],\n  "sufficient": true\n}'
+    )
+    index = {"e1": {"edge_id": "e1", "source": "A", "predicate": "p", "target": "B",
+                     "page_title": "P", "block_uid": "b", "origin": ORIGIN_LLM, "quote": None}}
+    answer = parse_query_response(raw, index, "q", "m")
+    assert "e1" in answer.answer  # untouched
+    assert len(answer.citations) == 1
+
+
 def test_hallucinated_citation_is_flagged_not_silently_accepted():
     """The fixture cites `e99`, which was never shown to the model."""
     body = json.loads(QUERY_FIXTURE.read_text(encoding="utf-8"))
@@ -226,6 +260,27 @@ def test_provenance_coverage_is_total(base, triples):
     report = score.score_provenance(graph)
     assert report["node_coverage"] == 1.0
     assert report["edge_coverage"] == 1.0
+
+
+def test_ask_fails_gracefully_instead_of_crashing_the_cli(tmp_path, base, triples, monkeypatch):
+    """Reproduces a real failure found running roamex on live notes 2026-08-28:
+    a truncated/malformed model reply raised out of `ask()` uncaught, taking
+    down the whole `query` CLI command with a stack trace. extract.run() and
+    resolve.run() both fail closed instead; ask() must too."""
+    graph = assemble(base, triples, ResolutionMap(mapping={"dana": "Dana Whitfield"}))
+    db = tmp_path / "g.db"
+    with GraphStore(db) as store:
+        store.write(graph)
+
+        def boom(*a, **kw):
+            raise ValueError("no JSON found in model reply: '{\"answer\": \"trunc")
+
+        monkeypatch.setattr(query_stage, "complete", boom)
+        answer = query_stage.ask(store, "who works at Rivet Labs?")
+
+    assert answer.sufficient is False
+    assert "Query failed" in answer.answer
+    assert answer.seeds, "seed names should still be populated even on failure"
 
 
 def test_stats_separates_roam_edges_from_llm_edges(base, triples):

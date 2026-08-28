@@ -8,7 +8,11 @@ bump its version, and the eval harness can compare the two populations.
 
 EXTRACT_VERSION = "extract/v1"
 RESOLVE_VERSION = "resolve/v1"
-QUERY_VERSION = "query/v1"
+# v2, 2026-08-28: the schema example showed "citations": [edge_id, ...] with
+# edge_id unquoted as a bare placeholder. gemini-3.6-flash pattern-matched it
+# literally and returned unquoted identifiers, which is invalid JSON and
+# raised out of every real query. v2 shows a concrete quoted example instead.
+QUERY_VERSION = "query/v2"
 
 ENTITY_TYPES = ["person", "org", "project", "place", "concept", "event", "tool", "source"]
 
@@ -76,11 +80,12 @@ QUERY_SYSTEM = """You answer questions using ONLY the knowledge-graph triples pr
 Each triple is given as:
   [edge_id] Subject --predicate--> Object   (source: page "P", block UID)
 
-Return ONLY a JSON object:
+Return ONLY a JSON object, citations as a JSON array of QUOTED STRINGS matching the
+bracketed ids exactly as shown — never bare identifiers, e.g.:
 {
   "answer": "your answer in prose, or an explicit statement that the graph does not contain it",
-  "citations": [edge_id, ...],
-  "sufficient": true/false
+  "citations": ["e1", "e7"],
+  "sufficient": true
 }
 
 Rules:
@@ -88,6 +93,7 @@ Rules:
 - Every claim in `answer` must be supported by an edge listed in `citations`. An uncited claim is a bug.
 - Multi-hop is expected: chain triples together and cite every edge in the chain.
 - Do not smooth over gaps. "The graph shows A relates to B, but nothing connects B to C" is a better answer than a plausible guess.
+- `citations` with no matches is `[]`, not omitted.
 """
 
 QUERY_USER = """Question: {question}
