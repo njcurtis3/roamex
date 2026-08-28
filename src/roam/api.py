@@ -9,22 +9,25 @@ recursively-nested `children` list of block dicts with `uid`/`string`.
 Nothing downstream of that shape changes; this is a second way to produce
 the same input, not a parallel pipeline.
 
-READ THIS BEFORE TRUSTING IT AGAINST A REAL GRAPH.
-The endpoint paths, auth headers, and peer-redirect handling below are
-sourced from a community client's published source (2b3pro/Roam-Graph-API,
-scripts/roam_backend.py) — Roam's own docs sit behind an in-app page this
-tool cannot reach, so this was never cross-checked against the primary
-source. The Datalog attribute names (:node/title, :block/uid,
-:block/string, :block/children, :block/order) are corroborated across
-several independent community sources, which is reasonable but not proof.
-What is GENUINELY UNTESTED is the exact JSON key spelling a pulled entity
-map serializes to ("block/uid" vs ":block/uid" vs something else) — nobody
-publishes that detail, and there is no way to know without a live call.
-`_get()` below tries several plausible spellings and RAISES with the
-actual keys found if none match, so the first real run fails loud with a
-diagnosable error instead of silently returning an empty or wrong graph.
-That first real run is the actual test of this module — do not treat it
-as working before it has been run once against real credentials.
+VERIFIED 2026-08-28 against a real graph: 1,490 pages pulled vs. 1,487 in a
+manual export taken two days earlier, 0 block-level mismatches across every
+page present in both, exact total block-count match (7,446), and the
+pulled export ran through roam.parse identically to the manual one on the
+same subtree. The endpoint paths, auth headers, and peer-redirect handling
+were sourced from a community client's published source
+(2b3pro/Roam-Graph-API, scripts/roam_backend.py) rather than Roam's own
+docs — which sit behind an in-app page this tool cannot reach — and held
+up on that run, including the one thing that genuinely could not be
+checked beforehand: the JSON key spelling a pulled entity serializes to
+(`_get()` tries several plausible spellings and raises with the actual
+keys if none match; that path has not actually been exercised by a
+mismatch, since the first guess was right).
+
+NOT YET ESTABLISHED: only one graph, one token, default depth=20, one run.
+A graph nested past depth=20 would truncate silently. The 401/403/404/
+429/503 error branches have never actually fired, so their messages are
+unverified in practice even though the code exists. See CLAUDE.md § The
+Roam API integration for the full status.
 """
 
 from __future__ import annotations

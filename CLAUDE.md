@@ -81,20 +81,24 @@ of a manual browser export, via `src/roam/api.py`. It returns exactly the page/c
 `roam.parse.load_export()` reads from a file, so nothing downstream changes — `pull` is a
 second way to produce the input, not a parallel pipeline.
 
-**Read this before trusting it.** The endpoint paths, auth headers (`Authorization: Bearer`
-+ `x-authorization: Bearer`), and the peer-redirect handling (Roam's backend 30x-redirects
-the first request for a graph to a dedicated `peer-N.api.roamresearch.com` host, which a
-client that follows redirects automatically will typically hit *without* the auth header —
-this module follows it manually, header intact) came from a community client's published
-source, not Roam's own docs, which sit behind an in-app page nothing outside Roam can reach.
-The Datalog attribute names (`:node/title`, `:block/uid`, `:block/string`, `:block/children`,
-`:block/order`) are corroborated across independent sources. What is **genuinely untested**
-is the exact JSON key spelling a pulled entity serializes to — `convert_pulled_pages()` tries
-several plausible spellings and raises with the real keys if none match, so a wrong
-assumption fails loud on the first live run instead of silently returning an empty or wrong
-graph. **That first live run against real credentials is the actual test of this module** —
-it has never been exercised against a real Roam graph. Treat a clean `pull` run as the
-verification, not this paragraph.
+**Verified 2026-08-28** against a real graph (1,490 pages via `pull` vs. 1,487 in a manual
+export taken two days earlier). Every uid and block string matched exactly across all 1,487
+pages present in both — 0 mismatches. The 3 extra pages in the live pull were legitimate:
+two daily-note pages Roam auto-created in the two days since the manual export, and one
+`API Token: <name>` page Roam itself creates when a token is generated. Total block count
+matched exactly (7,446 = 7,446), and the pulled export ran through `parse` and produced
+identical output to the manual export on the same subtree. The endpoint paths, auth headers,
+and peer-redirect handling (sourced from a community client, not Roam's own docs — see
+`src/roam/api.py`'s module docstring for why) and the Datalog attribute names all held up on
+this first real run, including the one piece that genuinely could not be checked beforehand:
+the JSON key spelling a pulled entity serializes to.
+
+**What this does NOT establish:** only one graph and one token were tested, at the default
+`depth=20`, on one run. Not yet exercised: a graph nested deeper than 20 levels (would
+silently truncate — `_selector()` has no depth-exceeded warning), the 401/403/404/429/503
+error paths (never triggered, so their messages are unverified in practice even though the
+code paths exist), or repeated pulls to confirm nothing changes between them. Re-verify after
+any change to `api.py`, and treat those specific gaps as real, not hedging.
 
 Get `ROAM_API_TOKEN` from your graph's own settings in Roam (an "API tokens" section) — this
 tool cannot generate one for you. `ROAM_GRAPH_NAME` is the graph's name as it appears in its

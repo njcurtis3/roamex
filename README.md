@@ -92,9 +92,9 @@ Two ways to get `exports/roam.json`:
 
 - **Manual**: Roam's own export (JSON, Markdown export won't work) from your graph's menu.
 - **Live**: `python -m src.cli pull` fetches it directly from Roam's Backend API, given
-  `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME` in `.env`. This is newer and less battle-tested than
-  the manual path — see `CLAUDE.md` § The Roam API integration before relying on it for
-  anything you can't easily re-check by hand.
+  `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME` in `.env`. Verified 2026-08-28 against a real graph
+  (0 block-level mismatches vs. a manual export) — see `CLAUDE.md` § The Roam API integration
+  for exactly what that verification did and did not cover.
 
 ## Three things it refuses to do
 
