@@ -103,14 +103,31 @@ svg.dragging { cursor: grabbing; }
 }
 .scroll { overflow-y: auto; flex: 1 1 auto; }
 
-/* index rows */
+/* Index rows are flat until selected, where they lift into the Atlas button
+   treatment — 1.5px ink border, 2px hard shadow. The border is present but
+   transparent when unselected so selecting a row never reflows the list by
+   the border's width. */
 .row {
-  display: flex; align-items: baseline; gap: 8px; width: 100%;
-  padding: 4px 10px; border: 0; box-shadow: none; background: none;
-  border-bottom: 1px solid var(--rule); text-align: left; cursor: pointer;
+  display: flex; align-items: baseline; gap: 8px;
+  width: calc(100% - 16px);
+  margin: 1px 8px;
+  padding: 4px 8px;
+  text-align: left;
+  background: none;
+  border: 1.5px solid transparent;
+  box-shadow: none;
 }
 .row:hover { background: var(--face); }
-.row[aria-selected="true"] { background: var(--ink); color: var(--paper); }
+/* No press animation while flat — with no shadow to collapse into, the
+   base button's 2px shift just reads as a jump. */
+.row:active { transform: none; }
+.row[aria-selected="true"] {
+  background: var(--ink); color: var(--paper);
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+.row[aria-selected="true"]:hover { background: var(--ink); }
+.row[aria-selected="true"]:active { box-shadow: 0 0 0 var(--ink); transform: translate(2px, 2px); }
 .row[aria-selected="true"] .row-meta { color: var(--paper); opacity: .75; }
 .row-code {
   flex: 0 0 auto; font-size: 10px; border: 1px solid currentColor;
@@ -118,11 +135,15 @@ svg.dragging { cursor: grabbing; }
 }
 .row-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-meta { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
-/* Folder header: a shade heavier than its contents, so the fold is legible
-   without adding a second border weight to the index. */
+/* Folder header sits on the face tone so the fold reads as a container
+   rather than another entry at the same level. */
 .row.group { background: var(--face); font-weight: 500; }
 .row.group:hover { background: var(--grid); }
-.row.nested { padding-left: 22px; }
+/* Nested rows are inset, and lift the same way when selected. */
+.row.nested {
+  width: calc(100% - 28px);
+  margin-left: 20px;
+}
 .row.nested .row-name { color: var(--muted); }
 .row.nested[aria-selected="true"] .row-name { color: var(--paper); }
 
