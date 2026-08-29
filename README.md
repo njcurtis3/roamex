@@ -130,12 +130,29 @@ link each. **A solid outline means you wrote that link by hand** in Roam; **dash
 model inferred it** from your prose. Edges follow the same rule. Selecting a structure dims
 everything it doesn't touch. Drag to pan, wheel to zoom, `esc` to deselect.
 
-**Right — three tabs.** *Detail* is what the selected entity says, what refers to it, and
+**Right — four tabs.** *Detail* is what the selected entity says, what refers to it, and
 every source block behind each claim — in the shot, `collective-journaling` is pinned, and
 each of its 121 references names the page, the block uid, and the quoted line. Nothing is
-asserted without a block you can go read. *Ask* runs a grounded question against the whole
+asserted without a block you can go read. *Path* finds the shortest chain connecting any two
+entities — pure graph traversal over data already on the page, so it's free and instant, and
+the connecting edges highlight on the map. *Ask* runs a grounded question against the whole
 graph and is the only thing here that costs a model call. *About* holds the legend and
 counts.
+
+### The Path tab
+
+![The Path tab: from "AI 2027" to "working-without-externally-provided-feedback", found directly connected by a "mentions" edge, with the connecting path highlighted in accent orange across the isometric map](docs/viewer-path.png)
+
+Two fields, `from` and `to`, each autocompleting against every entity name in the graph.
+`Find path` runs a breadth-first search over the edges already sitting in the page — no
+route, no model call, so it's instant and free. In the shot above, `AI 2027` connects to
+`working-without-externally-provided-feedback` in one hop via a `mentions` edge; a longer
+chain shows every intermediate entity and the predicate connecting each pair, and the whole
+path lights up on the map in accent orange so you can see it in context, not just as a list.
+The search ignores the `origin` filter at top — it looks for a connection through the full
+graph regardless, and switches the filter back to `all` if the path it found would otherwise
+be hidden. If the two entities live in disconnected parts of your graph, it says so rather
+than guessing.
 
 ## Three things it refuses to do
 

@@ -245,3 +245,33 @@ def test_query_route_is_not_reachable_by_GET():
     source = (Path(__file__).parent.parent / "web" / "serve.py").read_text(encoding="utf-8")
     do_get = source.split("def do_GET")[1].split("def do_POST")[0]
     assert "/api/query" not in do_get
+
+
+def _path_finder_js() -> str:
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    return html.split("/* ---------- path finder")[1].split("/* ---------- tabs")[0]
+
+
+def test_path_finder_makes_no_network_call():
+    """The pitch is 'free, no model call' — findPath and its wiring must stay
+    pure client-side traversal over data already fetched by /api/graph. A
+    fetch() sneaking in here would silently turn a free feature into a paid
+    one, or one that needs a route that doesn't exist."""
+    js = _strip_line_comments(_path_finder_js())
+    assert "fetch(" not in js
+
+
+def test_path_finder_route_and_tab_exist():
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    assert 'data-tab="path"' in html
+    assert 'id="panePath"' in html and 'id="pathForm"' in html
+
+
+def test_path_edge_key_includes_block_uid():
+    """Two distinct edges can share source, target, and predicate (the same
+    relation stated in two different blocks). Without block_uid in the key,
+    highlighting one would highlight both, and clearing one wouldn't clear
+    the other's highlight."""
+    js = _path_finder_js()
+    fn = js.split("function edgeKey")[1].split("function buildAdjacency")[0]
+    assert "block_uid" in fn

@@ -238,10 +238,30 @@ kbd {
   <div id="panel">
     <div class="tabs" role="tablist">
       <button class="tab" role="tab" data-tab="detail" aria-selected="true">Detail</button>
+      <button class="tab" role="tab" data-tab="path" aria-selected="false">Path</button>
       <button class="tab" role="tab" data-tab="ask" aria-selected="false">Ask</button>
       <button class="tab" role="tab" data-tab="about" aria-selected="false">About</button>
     </div>
     <div class="scroll" id="paneDetail"><div class="empty">Loading graph…</div></div>
+    <div class="scroll" id="panePath" hidden>
+      <div class="pane" style="padding-bottom:0">
+        <div class="eyebrow">Path finder</div>
+        <p style="color:var(--muted)">Shortest chain connecting two entities, through links you
+        wrote and relations a model inferred, in either direction. <mark>Free — no model call</mark>,
+        and it searches the whole graph regardless of the origin filter above.</p>
+      </div>
+      <form id="pathForm" style="display:flex;flex-direction:column;gap:6px;padding:0 12px 10px">
+        <input id="pathFrom" list="nodeNames" placeholder="from…" autocomplete="off">
+        <input id="pathTo" list="nodeNames" placeholder="to…" autocomplete="off">
+        <datalist id="nodeNames"></datalist>
+        <div style="display:flex;gap:6px">
+          <button class="primary" type="submit" id="pathBtn" style="flex:1 1 auto">Find path</button>
+          <button type="button" id="pathSwap" title="Swap from/to">⇄</button>
+          <button type="button" id="pathClear">Clear</button>
+        </div>
+      </form>
+      <div class="pane" id="pathResult"></div>
+    </div>
     <div class="scroll" id="paneAsk" hidden>
       <form id="askForm">
         <input id="question" placeholder="ask your graph…" maxlength="500" autocomplete="off">
@@ -307,6 +327,14 @@ let originFilter = "all";
 let searchTerm = "";
 let layout = new Map();   // id -> {x, y}
 
+// Path finder state. Kept separate from selectedId so a highlighted path
+// survives clicking through its own nodes to read their detail.
+let NODES_BY_ID = new Map();
+let NAME_TO_ID = new Map();   // first node with a given name wins ties
+let ADJ = new Map();          // id -> [{other, edge}], both directions
+let pathNodeIds = new Set();
+let pathEdgeKeys = new Set();
+
 /* ---------- isometric projection -------------------------------------
    Atlas's grammar: P(gx,gy,z) = [(gx-gy)*36, (gx+gy)*18 - z] on a 72x36
    tile. Nodes are placed on a grid ordered by degree so the busiest
@@ -365,11 +393,12 @@ function render() {
     const p = document.createElementNS(SVGNS, "polyline");
     p.setAttribute("points", `${x1},${y1} ${bx},${by} ${x2},${y2}`);
     p.setAttribute("fill", "none");
-    p.setAttribute("stroke", e.origin === "llm" ? "var(--accent)" : "var(--grid)");
-    p.setAttribute("stroke-width", e.origin === "llm" ? "1.4" : "1");
-    if (e.origin === "llm") p.setAttribute("stroke-dasharray", "4 3");
-    const touching = selectedId && (e.source === selectedId || e.target === selectedId);
-    p.setAttribute("opacity", selectedId ? (touching ? "1" : "0.15") : "0.75");
+    const onPath = pathEdgeKeys.has(edgeKey(e));
+    p.setAttribute("stroke", onPath ? "var(--accent)" : (e.origin === "llm" ? "var(--accent)" : "var(--grid)"));
+    p.setAttribute("stroke-width", onPath ? "2.6" : (e.origin === "llm" ? "1.4" : "1"));
+    if (!onPath && e.origin === "llm") p.setAttribute("stroke-dasharray", "4 3");
+    const touching = onPath || (selectedId && (e.source === selectedId || e.target === selectedId));
+    p.setAttribute("opacity", onPath ? "1" : (selectedId ? (touching ? "1" : "0.15") : "0.75"));
     gEdges.appendChild(p);
   }
   vp.appendChild(gEdges);
@@ -398,18 +427,21 @@ function render() {
     g.appendChild(tip);
 
     const isSel = n.id === selectedId;
-    const dim = selectedId && !isSel && !isNeighbour(n.id);
+    const onPath = pathNodeIds.has(n.id);
+    const dim = selectedId && !isSel && !isNeighbour(n.id) && !onPath;
     g.setAttribute("opacity", dim ? "0.25" : "1");
 
     // Height encodes degree — the busiest entities literally stand tallest.
     const h = Math.min(34, 6 + n.degree * 1.6);
     const w = 15;
     const top = `0,${-h} ${w},${-h + TILE_H / 2} 0,${-h + TILE_H} ${-w},${-h + TILE_H / 2}`;
+    const strokeColor = onPath ? "var(--accent)" : "var(--ink)";
+    const strokeWidth = onPath ? "2" : "1.2";
     const face = document.createElementNS(SVGNS, "polygon");
     face.setAttribute("points", top);
     face.setAttribute("fill", isSel ? "var(--ink)" : "var(--face)");
-    face.setAttribute("stroke", "var(--ink)");
-    face.setAttribute("stroke-width", "1.2");
+    face.setAttribute("stroke", strokeColor);
+    face.setAttribute("stroke-width", strokeWidth);
     // A node with only roam-link provenance is structure the author wrote
     // by hand; llm-only is inferred. Dashed = inferred, matching Atlas's
     // "ghost / not built" convention for things that aren't load-bearing.
@@ -418,14 +450,14 @@ function render() {
     const left = document.createElementNS(SVGNS, "polygon");
     left.setAttribute("points", `${-w},${-h + TILE_H / 2} 0,${-h + TILE_H} 0,${TILE_H} ${-w},${TILE_H / 2}`);
     left.setAttribute("fill", "var(--paper)");
-    left.setAttribute("stroke", "var(--ink)");
-    left.setAttribute("stroke-width", "1.2");
+    left.setAttribute("stroke", strokeColor);
+    left.setAttribute("stroke-width", strokeWidth);
 
     const right = document.createElementNS(SVGNS, "polygon");
     right.setAttribute("points", `${w},${-h + TILE_H / 2} 0,${-h + TILE_H} 0,${TILE_H} ${w},${TILE_H / 2}`);
     right.setAttribute("fill", "var(--grid)");
-    right.setAttribute("stroke", "var(--ink)");
-    right.setAttribute("stroke-width", "1.2");
+    right.setAttribute("stroke", strokeColor);
+    right.setAttribute("stroke-width", strokeWidth);
 
     g.append(left, right, face);
 
@@ -812,6 +844,158 @@ function renderAnswer(a) {
   }
 }
 
+/* ---------- path finder -------------------------------------------------
+   Pure client-side BFS over the whole edge set already sitting in DATA —
+   no route, no model call, no cost. Treated as undirected for reachability
+   (you want to know two entities connect at all), but every hop is still
+   displayed in its true --predicate--> direction, same convention as an
+   Ask citation, so the chain never misrepresents which way a fact points. */
+
+function edgeKey(e) {
+  return `${e.source}>${e.target}>${e.predicate}>${e.block_uid}`;
+}
+
+function buildAdjacency() {
+  const adj = new Map();
+  for (const e of DATA.edges) {
+    if (!adj.has(e.source)) adj.set(e.source, []);
+    if (!adj.has(e.target)) adj.set(e.target, []);
+    adj.get(e.source).push({ other: e.target, edge: e });
+    adj.get(e.target).push({ other: e.source, edge: e });
+  }
+  return adj;
+}
+
+/** Shortest hop count via BFS. Returns an array of {id, edge} for each hop
+ *  (id is the node arrived at), or null if the two are disconnected. */
+function findPath(fromId, toId) {
+  if (fromId === toId) return [];
+  const visited = new Set([fromId]);
+  const queue = [fromId];
+  const cameFrom = new Map();
+  for (let head = 0; head < queue.length; head++) {
+    const cur = queue[head];
+    for (const { other, edge } of ADJ.get(cur) || []) {
+      if (visited.has(other)) continue;
+      visited.add(other);
+      cameFrom.set(other, { id: other, edge });
+      if (other === toId) {
+        const steps = [];
+        for (let node = toId; node !== fromId; ) {
+          const info = cameFrom.get(node);
+          steps.push(info);
+          // walk back to whichever endpoint of this hop's edge isn't `node`
+          node = info.edge.source === node ? info.edge.target : info.edge.source;
+        }
+        return steps.reverse();
+      }
+      queue.push(other);
+    }
+  }
+  return null;
+}
+
+function focusOnIds(ids) {
+  const pts = ids.filter(id => layout.has(id)).map(id => {
+    const { gx, gy } = layout.get(id);
+    return project(gx, gy);
+  });
+  if (!pts.length) return;
+  const rect = $("canvasWrap").getBoundingClientRect();
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const minX = Math.min(...xs) - 80, maxX = Math.max(...xs) + 80;
+  const minY = Math.min(...ys) - 80, maxY = Math.max(...ys) + 80;
+  const k = Math.min(rect.width / (maxX - minX), rect.height / (maxY - minY), 1.6);
+  VIEW.k = Math.max(0.05, Number.isFinite(k) ? k : 1.6);
+  VIEW.x = rect.width / 2 - ((minX + maxX) / 2) * VIEW.k;
+  VIEW.y = rect.height / 2 - ((minY + maxY) / 2) * VIEW.k;
+  applyTransform();
+}
+
+function clearPathHighlight() {
+  pathNodeIds = new Set();
+  pathEdgeKeys = new Set();
+  render();
+}
+
+function renderPathResult(fromId, steps) {
+  pathNodeIds = new Set([fromId, ...steps.map(s => s.id)]);
+  pathEdgeKeys = new Set(steps.map(s => edgeKey(s.edge)));
+  // A path found under a filtered origin view might include edges the
+  // filter is hiding — show it regardless, rather than a path the user
+  // can't actually see highlighted.
+  if (originFilter !== "all") { originFilter = "all"; $("originFilter").value = "all"; }
+  renderIndex();
+  render();
+  focusOnIds([fromId, ...steps.map(s => s.id)]);
+
+  const out = $("pathResult");
+  out.replaceChildren();
+  const h = document.createElement("div");
+  h.className = "eyebrow";
+  h.textContent = steps.length === 1 ? "Directly connected" : `${steps.length} hops`;
+  out.appendChild(h);
+
+  for (const s of steps) {
+    const e = s.edge;
+    const srcNode = NODES_BY_ID.get(e.source), tgtNode = NODES_BY_ID.get(e.target);
+    const d = document.createElement("div");
+    d.className = "edge";
+    const line = document.createElement("div");
+    const fromBtn = document.createElement("button");
+    fromBtn.className = "jump";
+    fromBtn.textContent = srcNode ? srcNode.name : e.source;
+    fromBtn.addEventListener("click", () => select(e.source, true));
+    const pred = document.createElement("span");
+    pred.className = "pred";
+    pred.textContent = ` —${e.predicate}→ `;
+    const toBtn = document.createElement("button");
+    toBtn.className = "jump";
+    toBtn.textContent = tgtNode ? tgtNode.name : e.target;
+    toBtn.addEventListener("click", () => select(e.target, true));
+    line.append(fromBtn, pred, toBtn);
+    d.appendChild(line);
+    const src = document.createElement("span");
+    src.className = "src";
+    src.innerHTML = `${e.origin === "llm" ? "inferred" : "link"} · page <b>${escapeHtml(e.page_title)}</b> · <code>${escapeHtml(e.block_uid)}</code> ·
+      open the node's Detail tab for the quoted block`;
+    d.appendChild(src);
+    out.appendChild(d);
+  }
+}
+
+$("pathForm").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const fromName = $("pathFrom").value.trim(), toName = $("pathTo").value.trim();
+  const out = $("pathResult");
+  if (!fromName || !toName) { out.innerHTML = `<p class="warn">Enter both entities.</p>`; return; }
+  const fromId = NAME_TO_ID.get(fromName), toId = NAME_TO_ID.get(toName);
+  if (!fromId) { out.innerHTML = `<p class="warn">No entity named "${escapeHtml(fromName)}".</p>`; return; }
+  if (!toId) { out.innerHTML = `<p class="warn">No entity named "${escapeHtml(toName)}".</p>`; return; }
+  if (fromId === toId) {
+    clearPathHighlight();
+    out.innerHTML = `<p style="color:var(--muted)">That's the same entity.</p>`;
+    return;
+  }
+  const steps = findPath(fromId, toId);
+  if (!steps) {
+    clearPathHighlight();
+    out.innerHTML = `<p class="warn">No path found — these live in disconnected parts of your graph.</p>`;
+    return;
+  }
+  renderPathResult(fromId, steps);
+});
+$("pathSwap").addEventListener("click", () => {
+  const a = $("pathFrom").value;
+  $("pathFrom").value = $("pathTo").value;
+  $("pathTo").value = a;
+});
+$("pathClear").addEventListener("click", () => {
+  $("pathFrom").value = ""; $("pathTo").value = "";
+  $("pathResult").replaceChildren();
+  clearPathHighlight();
+});
+
 /* ---------- tabs, theme, pan/zoom -------------------------------------- */
 
 function showTab(name) {
@@ -819,9 +1003,16 @@ function showTab(name) {
     t.setAttribute("aria-selected", String(t.dataset.tab === name));
   }
   $("paneDetail").hidden = name !== "detail";
+  $("panePath").hidden = name !== "path";
   $("paneAsk").hidden = name !== "ask";
   $("paneAbout").hidden = name !== "about";
   if (name === "ask") $("question").focus();
+  // Prefill "from" with whatever's pinned — the common case is "what
+  // connects this to X", starting from the entity you're already looking at.
+  if (name === "path" && selectedId && !$("pathFrom").value) {
+    const n = NODES_BY_ID.get(selectedId);
+    if (n) $("pathFrom").value = n.name;
+  }
 }
 document.querySelectorAll(".tab").forEach(t =>
   t.addEventListener("click", () => showTab(t.dataset.tab)));
@@ -1006,6 +1197,19 @@ function renderAbout() {
      <span><b>${c.edges ?? 0}</b> edges</span>
      <span><b>${c.llm_edges ?? 0}</b> inferred</span>`;
   $("hintExtra").textContent = `${DATA.nodes.length} structures on the map`;
+
+  NODES_BY_ID = new Map(DATA.nodes.map(n => [n.id, n]));
+  NAME_TO_ID = new Map();
+  for (const n of DATA.nodes) if (!NAME_TO_ID.has(n.name)) NAME_TO_ID.set(n.name, n.id);
+  ADJ = buildAdjacency();
+  const dl = $("nodeNames");
+  const frag = document.createDocumentFragment();
+  for (const n of [...DATA.nodes].sort((a, b) => a.name.localeCompare(b.name))) {
+    const opt = document.createElement("option");
+    opt.value = n.name;
+    frag.appendChild(opt);
+  }
+  dl.appendChild(frag);
 
   layout = computeLayout(DATA.nodes);
   renderIndex();
