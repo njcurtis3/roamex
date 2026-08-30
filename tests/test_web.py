@@ -247,6 +247,61 @@ def test_query_route_is_not_reachable_by_GET():
     assert "/api/query" not in do_get
 
 
+def test_model_route_exists_and_is_readable_by_GET():
+    """/api/model is a free, local lookup (model_for() just reads env/config)
+    — it must stay reachable by GET so the ask status line can show the
+    model name before spending anything on a real query."""
+    source = (Path(__file__).parent.parent / "web" / "serve.py").read_text(encoding="utf-8")
+    do_get = source.split("def do_GET")[1].split("def do_POST")[0]
+    assert "/api/model" in do_get
+
+
+def test_query_response_includes_token_counts():
+    """The ask status line reports tokens used; if serve.py stopped putting
+    them in the /api/query response, the line would silently show 0/0."""
+    source = (Path(__file__).parent.parent / "web" / "serve.py").read_text(encoding="utf-8")
+    do_post = source.split("def do_POST")[1].split("def _graph")[0]
+    assert '"prompt_tokens": answer.prompt_tokens' in do_post
+    assert '"completion_tokens": answer.completion_tokens' in do_post
+
+
+def test_answer_carries_token_counts_from_the_completion():
+    """ask() must copy usage off the Completion it got back onto the Answer
+    it returns — the two are separate objects, so this doesn't happen for
+    free just by parse_query_response running."""
+    source = (Path(__file__).parent.parent / "src" / "pipeline" / "query.py").read_text(encoding="utf-8")
+    ask_fn = source.split("def ask(")[1]
+    assert "answer.prompt_tokens = completion.prompt_tokens" in ask_fn
+    assert "answer.completion_tokens = completion.completion_tokens" in ask_fn
+
+
+def test_ask_status_line_elements_exist():
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    assert 'id="askStatus"' in html
+    assert 'id="askSpinner"' in html
+    assert 'id="askStatusText"' in html
+    assert "@keyframes spin" in html
+
+
+def test_ask_model_fetched_at_boot():
+    """ASK_MODEL must be populated before a question can be asked, or the
+    status line's first render has nothing to show but the fallback text."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    boot = html.split("(async function boot()")[1]
+    assert 'fetch("/api/model")' in boot
+    assert "ASK_MODEL = " in boot
+
+
+def test_ask_submit_updates_status_before_and_after_the_call():
+    """setAskStatus must be called both immediately on submit (spinning) and
+    after the response resolves (with token counts) — a regression here
+    would leave the spinner running forever or never show up at all."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    handler = html.split('$("askForm").addEventListener("submit"')[1].split("function renderAnswer")[0]
+    assert "setAskStatus({ spinning: true" in handler
+    assert "setAskStatus({" in handler and "total" in handler
+
+
 def _path_finder_js() -> str:
     html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
     return html.split("/* ---------- path finder")[1].split("/* ---------- tabs")[0]

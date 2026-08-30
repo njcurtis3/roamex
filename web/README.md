@@ -54,6 +54,7 @@ your notes don't have.
 | `/` | GET | free |
 | `/api/graph` | GET | free — nodes, edges, counts |
 | `/api/node/<id>` | GET | free — one node, its edges, full provenance |
+| `/api/model` | GET | free — the model name `/api/query` will use, read from config |
 | `/api/query` | **POST** | **a model call** |
 
 `/api/query` is POST specifically so that loading, refreshing, or prefetching the page

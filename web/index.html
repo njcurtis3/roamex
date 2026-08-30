@@ -197,6 +197,18 @@ blockquote {
 #askForm input { flex: 1 1 auto; }
 .answer { white-space: pre-wrap; }
 .warn { color: var(--accent); }
+.ask-status {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 12px; font-size: 11px; color: var(--muted);
+  border-bottom: 1px solid var(--rule);
+}
+.ask-status.warn-status { color: var(--accent); }
+.spinner {
+  flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%;
+  border: 1.5px solid var(--rule); border-top-color: var(--accent);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* hint bar */
 #hint {
@@ -289,6 +301,10 @@ kbd {
         <input id="question" placeholder="ask your graph…" maxlength="500" autocomplete="off">
         <button class="primary" type="submit" id="askBtn">Ask</button>
       </form>
+      <div class="ask-status" id="askStatus" hidden>
+        <span class="spinner" id="askSpinner"></span>
+        <span id="askStatusText"></span>
+      </div>
       <div class="pane" id="askResult">
         <p style="color:var(--muted)">Answers are built only from triples in this graph, and
         every claim cites the block it came from. <mark>Costs a model call.</mark></p>
@@ -368,6 +384,11 @@ let NAME_TO_ID = new Map();   // first node with a given name wins ties
 let ADJ = new Map();          // id -> [{other, edge}], both directions
 let pathNodeIds = new Set();
 let pathEdgeKeys = new Set();
+
+// Fetched once at boot from /api/model (a local, free lookup — no network
+// call) so the status line can name the model the instant Ask is pressed,
+// rather than waiting on the query response to know what it's even asking.
+let ASK_MODEL = "";
 
 /* ---------- isometric projection -------------------------------------
    Atlas's grammar: P(gx,gy,z) = [(gx-gy)*36, (gx+gy)*18 - z] on a 72x36
@@ -815,6 +836,14 @@ function edgeSection(title, edges) {
 
 /* ---------- ask -------------------------------------------------------- */
 
+function setAskStatus({ spinning, text, warn = false }) {
+  const status = $("askStatus");
+  status.hidden = false;
+  status.classList.toggle("warn-status", warn);
+  $("askSpinner").hidden = !spinning;
+  $("askStatusText").textContent = text;
+}
+
 $("askForm").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const q = $("question").value.trim();
@@ -822,6 +851,7 @@ $("askForm").addEventListener("submit", async (ev) => {
   const out = $("askResult");
   $("askBtn").disabled = true;
   out.innerHTML = `<p style="color:var(--muted)">Asking… <mark>this calls a model</mark></p>`;
+  setAskStatus({ spinning: true, text: `${ASK_MODEL || "model"} · asking…` });
   try {
     const r = await fetch("/api/query", {
       method: "POST",
@@ -831,8 +861,14 @@ $("askForm").addEventListener("submit", async (ev) => {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || r.statusText);
     renderAnswer(data);
+    const total = (data.prompt_tokens || 0) + (data.completion_tokens || 0);
+    setAskStatus({
+      spinning: false,
+      text: `${data.model || ASK_MODEL} · ${total} tokens (${data.prompt_tokens || 0} in / ${data.completion_tokens || 0} out)`,
+    });
   } catch (err) {
     out.innerHTML = `<p class="warn">${escapeHtml(String(err))}</p>`;
+    setAskStatus({ spinning: false, text: `${ASK_MODEL || "model"} · failed`, warn: true });
   } finally {
     $("askBtn").disabled = false;
   }
@@ -1275,6 +1311,11 @@ function renderAbout() {
   refit();
   renderEmptyDetail();
   renderAbout();
+
+  try {
+    const r = await fetch("/api/model");
+    if (r.ok) ASK_MODEL = (await r.json()).model || "";
+  } catch (err) { /* status line just falls back to "model" */ }
 })();
 </script>
 </body>

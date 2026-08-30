@@ -32,6 +32,8 @@ class Answer:
     seeds: list[str] = field(default_factory=list)
     triples_shown: int = 0
     model: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 def serialize(graph: Graph) -> tuple[str, dict[str, dict]]:
@@ -183,6 +185,8 @@ def ask(
             max_tokens=4096,
         )
         answer = parse_query_response(completion.text, index, question, completion.model)
+        answer.prompt_tokens = completion.prompt_tokens
+        answer.completion_tokens = completion.completion_tokens
     except Exception as exc:
         # extract.run() and resolve.run() both fail closed instead of crashing
         # their callers; query had no such guard, so a parse error (truncation,

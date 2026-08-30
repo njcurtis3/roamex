@@ -41,7 +41,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.llm.openrouter import load_dotenv  # noqa: E402
+from src.llm.openrouter import load_dotenv, model_for  # noqa: E402
 from src.pipeline import query as query_stage  # noqa: E402
 from src.store.graph import GraphStore  # noqa: E402
 
@@ -96,6 +96,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, INDEX.read_bytes(), "text/html; charset=utf-8")
         if path == "/api/graph":
             return self._graph()
+        if path == "/api/model":
+            return self._json({"model": model_for("query")})
         if path.startswith("/api/node/"):
             return self._node(path[len("/api/node/"):])
         self._error(404, "no such route")
@@ -139,6 +141,8 @@ class Handler(BaseHTTPRequestHandler):
             "seeds": answer.seeds,
             "triples_shown": answer.triples_shown,
             "model": answer.model,
+            "prompt_tokens": answer.prompt_tokens,
+            "completion_tokens": answer.completion_tokens,
             "citations": answer.citations,
             "invalid_citations": answer.invalid_citations,
         })
