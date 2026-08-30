@@ -1,33 +1,23 @@
 # roamex
 
-Connects to your Roam Research graph over Roam's own API and turns it into a queryable
-knowledge graph where every answer cites the block it came from.
+Turns your Roam Research graph into a queryable knowledge graph, where every answer cites
+the block it came from.
 
-Your Roam graph is already a graph: pages, blocks, `[[links]]`, `#tags`, `attribute:: value`.
-roamex pulls that structure live and reads it directly and deterministically — no model
-involved, because running one over structure the format already states just makes ground
-truth fuzzier.
-
-The part worth paying for is the second pass. A language model reads the *prose* inside your
-blocks and extracts the relations you stated in a sentence but never linked:
+roamex reads your Roam graph directly — pages, blocks, `[[links]]`, `#tags`,
+`attribute:: value` — deterministically, no model involved. Then a language model reads the
+*prose* inside your blocks and extracts the relations you stated but never linked:
 
 > "Started at Acme in 2019, reporting to Dana."
 
-No `[[Acme]]`, no `[[Dana]]`, so Roam's own graph shows nothing. roamex turns it into
-`author --works_at--> Acme` and `author --reports_to--> Dana Whitfield`, attached to the pages
-you already keep, each edge stamped with the block uid that produced it.
-
-`pull` fetches your graph live — no browser, no manual export:
+No `[[Acme]]`, no `[[Dana]]`, so Roam's own graph shows nothing. roamex turns this into
+`author --works_at--> Acme` and `author --reports_to--> Dana Whitfield`, attached to your
+existing pages, each edge stamped with the block uid that produced it.
 
 ```
 $ python -m src.cli pull
 pulling graph 'your-graph' (depth=20)...
   wrote 1,487 pages to exports/roam.json
-```
 
-Then you can ask it things, and check its work:
-
-```
 $ python -m src.cli query "who wrote the Kestrel parser?"
 
 Dana Whitfield wrote the Kestrel parser. She is the data lead at Rivet Labs,
@@ -42,7 +32,7 @@ citations:
   Rivet Labs --builds_tooling_for--> Project Halyard  [page "Rivet Labs", block blk-009]
 ```
 
-## The pipeline
+## Pipeline
 
 | Stage | What it does | Model? |
 |---|---|---|
@@ -54,17 +44,17 @@ citations:
 | `query` | question → k-hop subgraph → answer with citations | yes |
 | `eval` | precision/recall, over-merge rate, provenance coverage | no |
 
-Models are called through [OpenRouter](https://openrouter.ai), tiered per stage by how
-*checkable* each stage is. Extraction runs on a cheap model because every triple it produces
-must quote its source block or get dropped — junk is discarded, not believed. Resolution is
-the stage to spend on: a wrong merge is silent and unrecoverable.
+Models run through [OpenRouter](https://openrouter.ai), tiered by stage. Extraction uses a
+cheap model — every triple must quote its source or get dropped, so junk is discarded rather
+than trusted. Resolution uses a stronger one, because a wrong merge is silent and
+unrecoverable.
 
 ```bash
 python -m src.cli models              # live catalog, cheapest first
 python -m src.cli models --match qwen
 ```
 
-Prices are read from OpenRouter at runtime, never hardcoded here.
+Prices come from OpenRouter at runtime, never hardcoded.
 
 ## Quick start
 
@@ -82,16 +72,12 @@ python -m src.cli assemble
 python -m src.cli query "what depends on the old parser?"
 ```
 
-`ROAM_API_TOKEN` comes from your graph's own settings in Roam (an "API tokens" section);
-`ROAM_GRAPH_NAME` is the graph's name as it appears in its URL. Everything downstream of
-`exports/roam.json` — `pages` through `query` — doesn't know or care whether that file came
-from `pull` or a manual export, so switching between them later costs nothing.
+- `ROAM_API_TOKEN` — from your graph's own settings in Roam, under "API tokens".
+- `ROAM_GRAPH_NAME` — the graph's name as it appears in its URL.
+- No token yet? Skip `pull` and drop a manual export instead (JSON, not Markdown, from your
+  graph's menu) at `exports/roam.json` — every other command works unchanged.
 
-No token yet, or want to try roamex before setting one up? Skip `pull` and drop Roam's own
-export (JSON, not Markdown, from your graph's menu) at `exports/roam.json` instead — same
-file, same shape, every other command works unchanged.
-
-`--dry-run` prices an extraction run against the live catalog before you spend anything:
+`--dry-run` prices an extraction run before you spend anything:
 
 ```
 375 blocks qualify for extraction
@@ -100,95 +86,70 @@ file, same shape, every other command works unchanged.
   estimated cost: $0.0122  (in $0.0049 + out $0.0073)
 ```
 
-Start with `--subtree` anyway. Not for the money — at these prices a 7,000-block graph runs
-for pocket change — but because a wrong prompt is cheaper to find on 59 blocks than on 4,757,
-and because a full run ships your entire knowledge base to a third-party provider in one go.
+Start with `--subtree` on a small page first. At these prices a full graph runs for pocket
+change, but a bad prompt is cheaper to catch on 59 blocks than on 4,757 — and a full run
+ships your entire knowledge base to a third-party model provider in one go.
 
-Everything except `pull`, `extract`, `resolve` and `query` runs offline with no key.
+Everything except `pull`, `extract`, `resolve`, and `query` runs offline, no key required.
 
-## The viewer
+## Viewer
 
 ```bash
-python web/serve.py          # 127.0.0.1:8790
+python web/serve.py          # opens 127.0.0.1:8790
 ```
 
 ![The roamex viewer: an index on the left, an isometric map of the graph in the middle, and a detail panel on the right showing every source block behind the selected entity](docs/viewer.png)
 
-Read-only, local, and served straight from `work/graph.db`. Three panes:
+A local, read-only viewer served straight from `work/graph.db`.
 
-**Left — the index.** Every entity, alphabetical, with a two-letter type code and its
-connection count. Daily notes fold into one collapsible group (they're often a third of a
-real graph and say little individually); everything else is listed flat. `/` jumps to the
-filter. Codes are `PG` page · `CO` concept · `PR` person · `EV` event · `SR` source ·
-`PL` place · `TL` tool · `OR` org · `PJ` project — hover any chip, or open **About**, for
-the full legend.
+- **Index** (left) — every entity, filterable by type and sortable by name, connection count,
+  or type. Daily notes fold into one collapsible group so they don't drown out everything
+  else.
+- **Map** (middle) — every entity as an isometric structure. **Height is degree**, so the
+  busiest entities stand tallest and sit nearest the centre. **Solid outline = you wrote that
+  link by hand** in Roam; **dashed = a model inferred it** from your prose. Drag to pan, wheel
+  to zoom.
+- **Detail** — what the selected entity says, what refers to it, and every source block
+  behind each claim.
+- **Path** — shortest chain connecting any two entities, with the connecting edges
+  highlighted on the map.
+- **Ask** — a grounded question against the whole graph.
+- **About** — legend and counts.
 
-**Middle — the map.** Every entity as an isometric structure. **Height is degree**, so the
-busiest entities stand tallest and sit nearest the centre, and the sparse outer field is the
-long tail — in the shot above, the faint outer diamond is mostly daily notes with a single
-link each. **A solid outline means you wrote that link by hand** in Roam; **dashed means a
-model inferred it** from your prose. Edges follow the same rule. Selecting a structure dims
-everything it doesn't touch. Drag to pan, wheel to zoom, `esc` to deselect.
-
-**Right — four tabs.** *Detail* is what the selected entity says, what refers to it, and
-every source block behind each claim — in the shot, `collective-journaling` is pinned, and
-each of its 121 references names the page, the block uid, and the quoted line. Nothing is
-asserted without a block you can go read. *Path* finds the shortest chain connecting any two
-entities — pure graph traversal over data already on the page, so it's free and instant, and
-the connecting edges highlight on the map. *Ask* runs a grounded question against the whole
-graph and is the only thing here that costs a model call. *About* holds the legend and
-counts.
-
-### The Path tab
+### Path — shortest connection between two entities
 
 ![The Path tab: from "AI 2027" to "working-without-externally-provided-feedback", found directly connected by a "mentions" edge, with the connecting path highlighted in accent orange across the isometric map](docs/viewer-path.png)
 
-Two fields, `from` and `to`, each autocompleting against every entity name in the graph.
-`Find path` runs a breadth-first search over the edges already sitting in the page — no
-route, no model call, so it's instant and free. In the shot above, `AI 2027` connects to
-`working-without-externally-provided-feedback` in one hop via a `mentions` edge; a longer
-chain shows every intermediate entity and the predicate connecting each pair, and the whole
-path lights up on the map in accent orange so you can see it in context, not just as a list.
-The search ignores the `origin` filter at top — it looks for a connection through the full
-graph regardless, and switches the filter back to `all` if the path it found would otherwise
-be hidden. If the two entities live in disconnected parts of your graph, it says so rather
-than guessing.
+Pure client-side breadth-first search over the graph already loaded in the page — free,
+instant, no model call. Works across the whole graph regardless of the origin filter, and
+switches the filter back to "all" if it would otherwise hide the path it found.
 
-### The Ask tab
+### Ask — grounded question answering
 
 ![The Ask tab, asked "What did I write about feedback loops in AI 2027?": the answer says the graph shows AI 2027 mentions feedback-loops-working-without-externally-provided-feedback but does not contain the actual text, flagged "graph did not have enough" and "93 triples shown", with one citation and its quoted source block including the block's full URL, wrapped rather than clipped](docs/viewer-ask.png)
 
-This is the shot worth reading closely, because it's the tool declining to bluff. The
-question asked for detail the graph doesn't have; instead of padding the answer with
-plausible-sounding filler, it says so directly, tags the answer `graph did not have enough`,
-and still shows its work — one real citation, the page and block it came from, and the exact
-quote it was grounded in. That's `sufficient: false` from the CLI's own output made visible:
-an honest gap is treated as a correct answer, not a failure to hide.
+The one feature here that costs a model call. Answers are built only from triples in your
+graph, and every claim cites the page and block it came from. When the graph doesn't have
+enough to answer, it says so — `sufficient: false` — rather than padding the answer with
+plausible-sounding filler.
 
-## Three things it refuses to do
+## What it won't do
 
-**Assert what your notes don't say.** An extracted relation must quote the block it came
-from, verbatim. If the model can't quote it, the triple is dropped — that's the line between
-"the note says this" and "the model happens to know this," and the second one is
-unfalsifiable once it's in the graph.
+- **Assert what your notes don't say.** An extracted relation must quote the block it came
+  from, verbatim, or it's dropped.
+- **Merge two people who share a name without evidence.** A missed merge just leaves a
+  duplicate node you can see and fix; an over-merge fuses two entities' facts with no signal
+  it happened. Resolution fails closed, and `eval` reports the over-merge rate.
+- **Answer without showing its work.** Query reasons over a serialized subgraph and nothing
+  else. A cited edge that wasn't actually shown to the model is flagged, not returned clean.
 
-**Merge two people who share a first name.** A missed merge leaves a duplicate node you can
-see and fix. An over-merge fuses two entities' facts with no signal they were ever separate.
-Resolution fails closed at every branch, and `eval` reports the over-merge rate.
+## Privacy
 
-**Answer without showing its work.** Query reasons over a serialized subgraph and nothing
-else. Citations are checked against what the model was actually shown; a cited edge that
-wasn't in the prompt is flagged, not returned clean.
-
-## Your notes stay yours
-
-`exports/`, `work/`, and unlabelled gold sets are gitignored — the export (however it got
-there — `pull` or manual), the derived graph, the database, all of it. The test fixtures are
-synthetic, not redacted real notes.
-
-Block text is sent to whichever model you point OpenRouter at. There's no exclusion filter
-yet; if you need one, it belongs in `blocks_for_extraction`. `pull` sends your Roam API token
-to Roam's own API and nowhere else.
+- `exports/`, `work/`, and gold sets are gitignored — nothing derived from your notes is
+  committed.
+- Block text is sent to whichever model you point OpenRouter at. There's no content filter
+  yet; if you need one, it belongs in `blocks_for_extraction`.
+- `pull` sends your Roam API token to Roam's own API and nowhere else.
 
 ## Testing
 
@@ -196,28 +157,22 @@ to Roam's own API and nowhere else.
 python -m pytest
 ```
 
-Every test runs offline. Each LLM stage splits into a `run()` that calls the network and a
-`parse_*_response()` that doesn't; tests only exercise the second, against recorded replies
-in `fixtures/openrouter/`. `pull` follows the same split — `convert_pulled_pages()` is tested
-offline against a fixture, `RoamClient`'s actual HTTP layer isn't — with one difference worth
-knowing: that fixture's shape was a documented guess until `pull` ran once for real (see
-Status below), not captured from an actual response the way the OpenRouter fixtures were.
+Every test runs offline. Each model-calling stage splits into a `run()` that hits the network
+and a `parse_*_response()` that doesn't — tests only exercise the second, against recorded
+replies in `fixtures/openrouter/`.
 
 ## Status
 
-Proven end-to-end against real data, not just the synthetic fixture: a 1,000-block sample
-pulled from across a real ~1,500-page graph (594 triples extracted, 0 failures), assembled
-into a 2,082-node / 3,211-edge graph with 100% provenance coverage, and queried successfully
-at that scale, including the point where retrieval hits its truncation cap. `pull` itself was
-verified against a live graph with 0 block-level mismatches against a manual export. The full
-graph (~4,750 extractable blocks) has been priced (~$0.16 at current cheap-model rates) but
-not yet run end-to-end — see `CLAUDE.md`'s Scale section for exactly what has and hasn't been
-measured, and for two known-and-unfixed limitations found running at this scale: a blocking
-hub-node artifact in `resolve` (capped, not eliminated) and a redundant double graph-load per
-query (measured at ~10% of query latency, not yet the bottleneck).
+- Proven end-to-end on real data: a 1,000-block sample from a ~1,500-page graph produced 594
+  triples (0 failures), assembled into a 2,082-node / 3,211-edge graph with 100% provenance
+  coverage, and queried successfully at that scale.
+- `pull` verified against a live graph with 0 block-level mismatches against a manual export.
+- The full graph (~4,750 extractable blocks) is priced (~$0.16 at current rates) but not yet
+  run end-to-end.
+- Two known, unfixed limits at scale: a blocking hub-node artifact in `resolve` (capped, not
+  eliminated), and a redundant double graph-load per query (~10% of latency).
+- The viewer is confirmed rendering the real 2,082-node graph and is collision-free at full
+  scale. One rough edge: structure labels overlap at full-graph zoom — the index or Detail
+  panel is the reliable way to read a specific entity at that density.
 
-The viewer in `web/` is built and confirmed rendering against the real 2,082-node graph —
-that's the screenshot above. Its JSON layer is tested and the layout is collision-free at
-full scale. One known rough edge visible in that shot: at full-graph zoom the structure
-labels in the dense centre overlap into noise. Zooming in resolves them, and the index and
-detail panel are the reliable way to read a specific entity.
+See `CLAUDE.md` for the full scale write-up.
