@@ -19,6 +19,12 @@ link by hand** in Roam; **dashed means a model inferred it from prose** and coul
 block for it. Edges follow the same rule: solid grid-coloured for Roam's own links, dashed
 accent for inferred ones. Selecting a structure dims everything it doesn't touch.
 
+The index (left panel) filters and sorts independently of the text search box: a row of
+type chips toggles which entity types are listed (click a code to hide or show it — Daily
+Notes fold under `page`, so hiding `PG` hides them too), and a sort dropdown orders the
+list by name (A→Z or Z→A), connection count (high→low or low→high), or type. All of this
+runs client-side over the graph already fetched — no extra request.
+
 The right panel has four tabs: **Detail** (what an entity says, what refers to it, and
 every source block behind it), **Path** (the shortest chain connecting any two entities —
 pure client-side BFS over the graph already on the page, free, no model call), **Ask** (a

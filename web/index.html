@@ -131,7 +131,7 @@ svg.dragging { cursor: grabbing; }
 .row[aria-selected="true"] .row-meta { color: var(--paper); opacity: .75; }
 .row-code {
   flex: 0 0 auto; font-size: 10px; border: 1px solid currentColor;
-  padding: 0 3px; text-transform: uppercase;
+  padding: 0 3px; text-transform: uppercase; white-space: nowrap;
 }
 .row-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-meta { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
@@ -170,6 +170,14 @@ svg.dragging { cursor: grabbing; }
 }
 .chip.on { background: var(--ink); color: var(--paper); }
 .chip.dashed { border-style: dashed; color: var(--muted); border-color: var(--muted); }
+/* Type-filter chips reuse .chip but are <button>s, so the base button rule's
+   border/shadow needs stripping back down to the flat chip look. */
+button.chip { box-shadow: none; cursor: pointer; }
+button.chip:not(.on) { opacity: .5; }
+/* :not(.on) here too — an "on" chip's dark text already sits on its light
+   fill; swapping that fill to --face on hover (dark in the dark theme)
+   left the text unreadable against its own background. */
+button.chip:hover:not(.on) { opacity: 1; background: var(--face); }
 .edge {
   border-bottom: 1px solid var(--rule); padding: 6px 0; font-size: 12px;
 }
@@ -231,6 +239,16 @@ kbd {
     <div class="section-head">
       <span>Index</span>
       <input id="search" placeholder="filter…" style="flex:1 1 auto;font-size:11px;padding:1px 4px">
+    </div>
+    <div class="section-head" style="flex-wrap:wrap;row-gap:6px">
+      <select id="sortMode" style="font-size:11px;padding:1px 4px">
+        <option value="name-asc">name a→z</option>
+        <option value="name-desc">name z→a</option>
+        <option value="degree-desc">connections high→low</option>
+        <option value="degree-asc">connections low→high</option>
+        <option value="type-asc">type</option>
+      </select>
+      <span id="typeChips" style="display:flex;flex-wrap:wrap;gap:3px"></span>
     </div>
     <div class="scroll" id="indexList"></div>
   </div>
@@ -330,6 +348,18 @@ let selectedId = null;
 let originFilter = "all";
 let searchTerm = "";
 let layout = new Map();   // id -> {x, y}
+let sortMode = "name-asc";
+let ALL_TYPES = [];        // every entity type present, TYPE_ORDER first
+let typeFilter = new Set();  // types currently shown in the index; starts full
+
+const NAME_CMP = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+const SORTERS = {
+  "name-asc": NAME_CMP,
+  "name-desc": (a, b) => -NAME_CMP(a, b),
+  "degree-desc": (a, b) => b.degree - a.degree || NAME_CMP(a, b),
+  "degree-asc": (a, b) => a.degree - b.degree || NAME_CMP(a, b),
+  "type-asc": (a, b) => a.type.localeCompare(b.type) || NAME_CMP(a, b),
+};
 
 // Path finder state. Kept separate from selectedId so a highlighted path
 // survives clicking through its own nodes to read their detail.
@@ -586,19 +616,37 @@ function capNote(shown, total) {
   return d;
 }
 
+function renderTypeChips() {
+  const wrap = $("typeChips");
+  wrap.replaceChildren();
+  for (const t of ALL_TYPES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (typeFilter.has(t) ? " on" : "");
+    b.textContent = CODE[t] || t.slice(0, 2).toUpperCase();
+    b.title = `${t} — click to ${typeFilter.has(t) ? "hide" : "show"} in the index`;
+    b.addEventListener("click", () => {
+      if (typeFilter.has(t)) typeFilter.delete(t); else typeFilter.add(t);
+      renderTypeChips();
+      renderIndex();
+    });
+    wrap.appendChild(b);
+  }
+}
+
 function renderIndex() {
   const list = $("indexList");
   list.replaceChildren();
   const { nodes } = visibleSets();
   const term = searchTerm.toLowerCase();
   const matches = nodes.filter(
-    n => !term || n.name.toLowerCase().includes(term) || n.type.includes(term)
+    n => typeFilter.has(n.type) &&
+      (!term || n.name.toLowerCase().includes(term) || n.type.includes(term))
   );
 
   const daily = matches.filter(isDailyNote)
     .sort((a, b) => dailyKey(b.name) - dailyKey(a.name));
-  const rest = matches.filter(n => !isDailyNote(n))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  const rest = matches.filter(n => !isDailyNote(n)).sort(SORTERS[sortMode]);
 
   if (!matches.length) {
     const d = document.createElement("div");
@@ -1038,6 +1086,7 @@ $("originFilter").addEventListener("change", (e) => {
   renderIndex(); render();
 });
 $("search").addEventListener("input", (e) => { searchTerm = e.target.value; renderIndex(); });
+$("sortMode").addEventListener("change", (e) => { sortMode = e.target.value; renderIndex(); });
 
 const svg = $("canvas");
 let drag = null;
@@ -1214,6 +1263,11 @@ function renderAbout() {
     frag.appendChild(opt);
   }
   dl.appendChild(frag);
+
+  const presentTypes = new Set(DATA.nodes.map(n => n.type));
+  ALL_TYPES = [...new Set([...TYPE_ORDER, ...presentTypes])].filter(t => presentTypes.has(t));
+  typeFilter = new Set(ALL_TYPES);
+  renderTypeChips();
 
   layout = computeLayout(DATA.nodes);
   renderIndex();

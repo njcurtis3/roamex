@@ -278,6 +278,62 @@ def test_pane_wraps_long_unbroken_text():
     assert "overflow-wrap" in pane_rule
 
 
+def test_row_code_does_not_wrap():
+    """Regression, found 2026-08-30: the two-letter type code in the About
+    legend's table wrapped onto two lines ('P' over 'G') because the table
+    column shrank the chip below its content width. white-space: nowrap
+    forces the cell to size to the chip instead."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    rule = html.split(".row-code {", 1)[1].split("}", 1)[0]
+    assert "white-space: nowrap" in rule
+
+
+def test_type_chip_hover_does_not_break_included_contrast():
+    """Regression, found 2026-08-30: the generic chip hover rule swapped an
+    'on' (included) chip's background to --face while leaving its text color
+    at --paper (its own dark-on-light text color) — in the dark theme that's
+    near-black text on a near-black background, i.e. invisible. The hover
+    background swap must be scoped to exclude .on chips."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    assert "button.chip:hover:not(.on)" in html
+
+
+def test_index_has_sort_and_type_filter_controls():
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    assert 'id="sortMode"' in html and 'id="typeChips"' in html
+    for opt in ["name-asc", "name-desc", "degree-desc", "degree-asc", "type-asc"]:
+        assert f'value="{opt}"' in html
+
+
+def test_sorters_cover_every_sort_mode_option():
+    """Each <option value=...> in #sortMode must have a matching entry in the
+    SORTERS map, or picking it silently falls back to sorting by nothing."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    select = html.split('id="sortMode"')[1].split("</select>")[0]
+    options = re.findall(r'value="([\w-]+)"', select)
+    sorters = html.split("const SORTERS = {")[1].split("};")[0]
+    for opt in options:
+        assert f'"{opt}":' in sorters, f"no SORTERS entry for {opt}"
+
+
+def test_type_filter_starts_with_every_type_included():
+    """typeFilter must be seeded from ALL_TYPES in boot(), not left empty —
+    an empty Set would render an index with nothing in it on first load."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    boot = html.split("(async function boot()")[1]
+    assert "typeFilter = new Set(ALL_TYPES)" in boot
+
+
+def test_render_index_applies_type_filter_before_daily_split():
+    """typeFilter must gate `matches` (before the daily/rest split), not just
+    `rest` — otherwise excluding 'page' would still show the Daily Notes
+    group, since daily notes are page-typed."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    fn = html.split("function renderIndex()")[1].split("function renderDetail")[0]
+    matches_line = fn.split("const matches = nodes.filter(")[1].split(");")[0]
+    assert "typeFilter.has(n.type)" in matches_line
+
+
 def test_path_edge_key_includes_block_uid():
     """Two distinct edges can share source, target, and predicate (the same
     relation stated in two different blocks). Without block_uid in the key,
