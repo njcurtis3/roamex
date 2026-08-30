@@ -19,6 +19,20 @@ link by hand** in Roam; **dashed means a model inferred it from prose** and coul
 block for it. Edges follow the same rule: solid grid-coloured for Roam's own links, dashed
 accent for inferred ones. Selecting a structure dims everything it doesn't touch.
 
+Inferred edges also carry the model's own `confidence` (0.0–1.0). The **min confidence**
+slider in the top strip hides inferred edges below its threshold entirely; written links are
+always confidence 1.0, so the slider never touches them. Untouched (the default), the map
+looks exactly as it did before this control existed. Move it above 0 and the edges that
+remain also fade by confidence — a barely-cleared inference reads differently from one the
+model was sure of — so confidence becomes a lens you opt into, not a permanent dimming of
+every inferred edge. A path found with Path finder ignores this control the same way it
+ignores the origin filter, for the same reason — a highlighted path shouldn't vanish because
+a filter is hiding one of its own hops.
+
+Every quote in the app — Detail's edges and source blocks, Ask's citations — has a **copy**
+button underneath that puts the quote and its page/block reference on the clipboard, ready to
+paste back into a Roam block.
+
 The index (left panel) filters and sorts independently of the text search box: a row of
 type chips toggles which entity types are listed (click a code to hide or show it — Daily
 Notes fold under `page`, so hiding `PG` hides them too), and a sort dropdown orders the

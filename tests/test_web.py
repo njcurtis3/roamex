@@ -333,6 +333,64 @@ def test_pane_wraps_long_unbroken_text():
     assert "overflow-wrap" in pane_rule
 
 
+def test_visible_sets_filters_edges_by_confidence():
+    """The threshold must gate visibleSets()'s edges, not just be read
+    somewhere — a regression here would leave the slider visually working
+    but silently doing nothing to the graph."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    fn = html.split("function visibleSets()")[1].split("function render()")[0]
+    assert "e.confidence >= minConfidence" in fn
+
+
+def test_roam_link_edges_are_never_hidden_by_confidence():
+    """Roam-link edges are always confidence 1.0 (models.py); the threshold
+    input only goes up to 1, so a written link must never disappear."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    slider = html.split('id="confidenceFilter"')[1].split(">")[0]
+    assert 'max="1"' in slider
+    src_confidence = (Path(__file__).parent.parent / "src" / "models.py").read_text(encoding="utf-8")
+    assert "confidence: float = 1.0  # roam-link edges are 1.0" in src_confidence
+
+
+def test_confidence_fade_is_gated_on_the_slider_being_touched():
+    """Regression, found 2026-08-30: confFactor originally applied to every
+    inferred edge unconditionally, so the default view (slider untouched,
+    minConfidence 0) looked dimmer than it did before this feature existed.
+    The fade must only kick in once minConfidence > 0, so the untouched
+    default renders exactly as it did pre-feature."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    fn = html.split("function render()")[1].split("function isNeighbour")[0]
+    assert "minConfidence > 0 && e.origin" in fn
+
+
+def test_path_finder_resets_confidence_filter_too():
+    """renderPathResult already resets originFilter so a found path is never
+    hidden by it; minConfidence needs the same treatment, or a path through
+    a low-confidence edge would highlight nothing visible on the map."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    fn = html.split("function renderPathResult(")[1].split("function ")[0]
+    assert "minConfidence = 0" in fn
+    assert '$("confidenceFilter").value = "0"' in fn
+
+
+def test_copy_button_wired_into_every_citation_list():
+    """makeCopyButton() must actually be called from each place a citation
+    is rendered (Detail's provenance list and edge sections, Ask's
+    citations, Path's hop list) — defining the helper without using it
+    everywhere leaves some citations silently uncopyable."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    assert html.count("makeCopyButton(") >= 5  # 1 definition + 4 call sites
+
+
+def test_citation_text_handles_missing_quote():
+    """Path-tab citations have no quote field in the /api/graph payload;
+    citationText must still produce something copyable rather than
+    embedding the literal string 'undefined'."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    fn = html.split("function citationText(")[1].split("function copyToClipboard")[0]
+    assert "quote\n    ?" in fn or "quote ?" in fn
+
+
 def test_row_code_does_not_wrap():
     """Regression, found 2026-08-30: the two-letter type code in the About
     legend's table wrapped onto two lines ('P' over 'G') because the table

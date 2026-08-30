@@ -187,6 +187,12 @@ button.chip:hover:not(.on) { opacity: 1; background: var(--face); }
   border: 0; box-shadow: none; background: none; padding: 0;
   text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
 }
+.copy-btn {
+  border: 0; box-shadow: none; background: none; padding: 0; margin-top: 3px;
+  font-size: 10px; color: var(--muted); text-decoration: underline;
+  text-underline-offset: 2px; cursor: pointer; display: inline-block;
+}
+.copy-btn:hover { color: var(--ink); }
 blockquote {
   margin: 4px 0; padding: 4px 8px; border-left: 2px solid var(--rule);
   color: var(--muted); font-style: italic;
@@ -240,6 +246,12 @@ kbd {
       <option value="llm">llm only</option>
       <option value="roam-link">roam links only</option>
     </select>
+  </label>
+  <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px"
+    title="Hides inferred edges below this confidence, and fades the ones that remain. Roam-link edges are always confidence 1.0, so this never touches them.">
+    min confidence
+    <input type="range" id="confidenceFilter" min="0" max="1" step="0.05" value="0" style="width:70px">
+    <span id="confidenceValue" style="min-width:2.5em">0.00</span>
   </label>
   <button id="refit">Refit</button>
   <button id="themeBtn" title="Toggle theme">◐</button>
@@ -362,6 +374,7 @@ let DATA = null;          // {counts, nodes, edges}
 let VIEW = { x: 0, y: 0, k: 1 };
 let selectedId = null;
 let originFilter = "all";
+let minConfidence = 0;
 let searchTerm = "";
 let layout = new Map();   // id -> {x, y}
 let sortMode = "degree-desc";
@@ -422,12 +435,18 @@ function computeLayout(nodes) {
 /* ---------- rendering ------------------------------------------------- */
 
 function visibleSets() {
-  const edges = DATA.edges.filter(e => originFilter === "all" || e.origin === originFilter);
+  // Roam-link edges are always confidence 1.0 (see models.py), so the
+  // threshold only ever trims inferred ones — a written link never
+  // disappears because of it.
+  const edges = DATA.edges.filter(e =>
+    (originFilter === "all" || e.origin === originFilter) && e.confidence >= minConfidence
+  );
   const keep = new Set();
   edges.forEach(e => { keep.add(e.source); keep.add(e.target); });
   // With a filter on, isolated nodes would be meaningless dots; with no
   // filter, keep everything so a 0-degree node is still findable.
-  const nodes = originFilter === "all" ? DATA.nodes : DATA.nodes.filter(n => keep.has(n.id));
+  const filtering = originFilter !== "all" || minConfidence > 0;
+  const nodes = filtering ? DATA.nodes.filter(n => keep.has(n.id)) : DATA.nodes;
   return { nodes, edges };
 }
 
@@ -453,7 +472,16 @@ function render() {
     p.setAttribute("stroke-width", onPath ? "2.6" : (e.origin === "llm" ? "1.4" : "1"));
     if (!onPath && e.origin === "llm") p.setAttribute("stroke-dasharray", "4 3");
     const touching = onPath || (selectedId && (e.source === selectedId || e.target === selectedId));
-    p.setAttribute("opacity", onPath ? "1" : (selectedId ? (touching ? "1" : "0.15") : "0.75"));
+    const restOpacity = selectedId ? (touching ? 1 : 0.15) : 0.75;
+    // Fade inferred edges toward the low-confidence end once the slider is
+    // actually in use, so "barely made the cut" reads differently from "the
+    // model was sure." Gated on minConfidence > 0 so the default view (no
+    // filter touched) looks exactly like it did before this feature existed
+    // — confidence is an opt-in lens, not a permanent dimming of every
+    // inferred edge. Roam-link edges are always confidence 1.0, so this
+    // factor is always 1 for them regardless.
+    const confFactor = (minConfidence > 0 && e.origin === "llm") ? 0.35 + 0.65 * e.confidence : 1;
+    p.setAttribute("opacity", onPath ? "1" : String(restOpacity * confFactor));
     gEdges.appendChild(p);
   }
   vp.appendChild(gEdges);
@@ -789,6 +817,7 @@ function renderDetail(n) {
       q.textContent = p.quote;
       d.appendChild(q);
     }
+    d.appendChild(makeCopyButton(p));
     src.appendChild(d);
   }
   el.appendChild(src);
@@ -829,6 +858,7 @@ function edgeSection(title, edges) {
       q.textContent = e.quote;
       d.appendChild(q);
     }
+    d.appendChild(makeCopyButton(e));
     wrap.appendChild(d);
   }
   return wrap;
@@ -922,6 +952,7 @@ function renderAnswer(a) {
       q.textContent = c.quote;
       d.appendChild(q);
     }
+    d.appendChild(makeCopyButton(c));
     out.appendChild(d);
   }
   if (!a.citations.length) {
@@ -1009,10 +1040,15 @@ function clearPathHighlight() {
 function renderPathResult(fromId, steps) {
   pathNodeIds = new Set([fromId, ...steps.map(s => s.id)]);
   pathEdgeKeys = new Set(steps.map(s => edgeKey(s.edge)));
-  // A path found under a filtered origin view might include edges the
-  // filter is hiding — show it regardless, rather than a path the user
-  // can't actually see highlighted.
+  // A path found under a filtered origin/confidence view might include
+  // edges the filters are hiding — show it regardless, rather than a path
+  // the user can't actually see highlighted.
   if (originFilter !== "all") { originFilter = "all"; $("originFilter").value = "all"; }
+  if (minConfidence > 0) {
+    minConfidence = 0;
+    $("confidenceFilter").value = "0";
+    $("confidenceValue").textContent = "0.00";
+  }
   renderIndex();
   render();
   focusOnIds([fromId, ...steps.map(s => s.id)]);
@@ -1048,6 +1084,7 @@ function renderPathResult(fromId, steps) {
     src.innerHTML = `${e.origin === "llm" ? "inferred" : "link"} · page <b>${escapeHtml(e.page_title)}</b> · <code>${escapeHtml(e.block_uid)}</code> ·
       open the node's Detail tab for the quoted block`;
     d.appendChild(src);
+    d.appendChild(makeCopyButton(e));
     out.appendChild(d);
   }
 }
@@ -1119,6 +1156,11 @@ try {
 $("refit").addEventListener("click", refit);
 $("originFilter").addEventListener("change", (e) => {
   originFilter = e.target.value;
+  renderIndex(); render();
+});
+$("confidenceFilter").addEventListener("input", (e) => {
+  minConfidence = parseFloat(e.target.value);
+  $("confidenceValue").textContent = minConfidence.toFixed(2);
   renderIndex(); render();
 });
 $("search").addEventListener("input", (e) => { searchTerm = e.target.value; renderIndex(); });
@@ -1200,6 +1242,52 @@ document.addEventListener("keydown", (e) => {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* ---------- copy citation ----------------------------------------------
+   Every quote/source line in the app (Detail's Says/Referred-to-by edges,
+   its Source blocks, and Ask's citations) is the same shape: page title,
+   block uid, optionally a quote. One formatter and one button builder for
+   all of them, so pasting a citation into a Roam block always looks the
+   same regardless of which tab it came from. */
+
+function citationText({ page_title, block_uid, quote }) {
+  return quote
+    ? `"${quote}"\n— page "${page_title}", block ${block_uid}`
+    : `page "${page_title}", block ${block_uid}`;
+}
+
+function copyToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  // Fallback for a non-secure context, which 127.0.0.1 normally isn't, but
+  // costs nothing to have.
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); } finally { ta.remove(); }
+  return Promise.resolve();
+}
+
+function makeCopyButton(source) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "copy-btn";
+  b.textContent = "copy";
+  b.title = "Copy this citation's quote and source";
+  b.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    copyToClipboard(citationText(source)).then(() => {
+      b.textContent = "copied";
+      setTimeout(() => { b.textContent = "copy"; }, 1200);
+    }).catch(() => {
+      b.textContent = "copy failed";
+      setTimeout(() => { b.textContent = "copy"; }, 1200);
+    });
+  });
+  return b;
 }
 
 function renderEmptyDetail() {
