@@ -377,6 +377,12 @@ let originFilter = "all";
 let minConfidence = 0;
 let searchTerm = "";
 let layout = new Map();   // id -> {x, y}
+// Cached DOM built by the last full render(), keyed for restyle() to update
+// in place — selection/path changes are far more frequent than the visible
+// node/edge SET changing, and at a few thousand structures a full teardown
+// and rebuild per click is the single most expensive thing this page does.
+let nodeEls = new Map();  // id -> { n, g, face, left, right, tag }
+let edgeEls = [];         // [{ e, el, confFactor }]
 let sortMode = "degree-desc";
 let ALL_TYPES = [];        // every entity type present, TYPE_ORDER first
 let typeFilter = new Set();  // types currently shown in the index; starts full
@@ -458,6 +464,7 @@ function render() {
 
   // Edges first (painter's order: ground plane under structures).
   const gEdges = document.createElementNS(SVGNS, "g");
+  const newEdgeEls = [];
   for (const e of edges) {
     const a = layout.get(e.source), b = layout.get(e.target);
     if (!a || !b || !byId.has(e.source) || !byId.has(e.target)) continue;
@@ -483,8 +490,10 @@ function render() {
     const confFactor = (minConfidence > 0 && e.origin === "llm") ? 0.35 + 0.65 * e.confidence : 1;
     p.setAttribute("opacity", onPath ? "1" : String(restOpacity * confFactor));
     gEdges.appendChild(p);
+    newEdgeEls.push({ e, el: p, confFactor });
   }
   vp.appendChild(gEdges);
+  edgeEls = newEdgeEls;
 
   // Structures, sorted by gx+gy for painter's order.
   const drawable = nodes
@@ -494,6 +503,7 @@ function render() {
       return (A.gx + A.gy) - (B.gx + B.gy);
     });
 
+  const newNodeEls = new Map();
   for (const n of drawable) {
     const { gx, gy } = layout.get(n.id);
     const g = document.createElementNS(SVGNS, "g");
@@ -545,21 +555,23 @@ function render() {
     g.append(left, right, face);
 
     // Readable label on a paper tag under the front corner (Atlas grammar).
-    if (VIEW.k > LABEL_ZOOM || isSel) {
-      const short = n.name.length > 16 ? n.name.slice(0, 15) + "…" : n.name;
-      const tag = document.createElementNS(SVGNS, "text");
-      tag.setAttribute("x", "0");
-      tag.setAttribute("y", String(TILE_H + 11));
-      tag.setAttribute("text-anchor", "middle");
-      tag.setAttribute("font-size", "9");
-      tag.setAttribute("font-family", "IBM Plex Mono, monospace");
-      tag.setAttribute("fill", "var(--ink)");
-      tag.setAttribute("paint-order", "stroke");
-      tag.setAttribute("stroke", "var(--paper)");
-      tag.setAttribute("stroke-width", "3");
-      tag.textContent = short.toUpperCase();
-      g.appendChild(tag);
-    }
+    // Always built (not just when visible) so a zoom crossing or a selection
+    // change can toggle it with a style flip in restyle() instead of paying
+    // for a full rebuild of every structure on the map.
+    const short = n.name.length > 16 ? n.name.slice(0, 15) + "…" : n.name;
+    const tag = document.createElementNS(SVGNS, "text");
+    tag.setAttribute("x", "0");
+    tag.setAttribute("y", String(TILE_H + 11));
+    tag.setAttribute("text-anchor", "middle");
+    tag.setAttribute("font-size", "9");
+    tag.setAttribute("font-family", "IBM Plex Mono, monospace");
+    tag.setAttribute("fill", "var(--ink)");
+    tag.setAttribute("paint-order", "stroke");
+    tag.setAttribute("stroke", "var(--paper)");
+    tag.setAttribute("stroke-width", "3");
+    tag.textContent = short.toUpperCase();
+    tag.style.display = (VIEW.k > LABEL_ZOOM || isSel) ? "" : "none";
+    g.appendChild(tag);
 
     g.addEventListener("click", (ev) => {
       ev.stopPropagation();
@@ -572,9 +584,46 @@ function render() {
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); select(n.id); }
     });
     vp.appendChild(g);
+    newNodeEls.set(n.id, { n, g, face, left, right, tag });
   }
+  nodeEls = newNodeEls;
 
   applyTransform();
+}
+
+// Cheap counterpart to render(): updates selection/path-dependent styling
+// (opacity, stroke, label visibility) on the DOM render() already built,
+// without touching the node/edge SET or recreating any element. Use this for
+// anything that changes only which node is selected or which path is
+// highlighted — a full render() is reserved for when visibleSets() itself
+// changes (a filter, sort of the *map*, or the confidence threshold).
+function restyle() {
+  for (const { e, el, confFactor } of edgeEls) {
+    const onPath = pathEdgeKeys.has(edgeKey(e));
+    el.setAttribute("stroke", onPath ? "var(--accent)" : (e.origin === "llm" ? "var(--accent)" : "var(--grid)"));
+    el.setAttribute("stroke-width", onPath ? "2.6" : (e.origin === "llm" ? "1.4" : "1"));
+    if (!onPath && e.origin === "llm") el.setAttribute("stroke-dasharray", "4 3");
+    else el.removeAttribute("stroke-dasharray");
+    const touching = onPath || (selectedId && (e.source === selectedId || e.target === selectedId));
+    const restOpacity = selectedId ? (touching ? 1 : 0.15) : 0.75;
+    el.setAttribute("opacity", onPath ? "1" : String(restOpacity * confFactor));
+  }
+  for (const { n, g, face, left, right, tag } of nodeEls.values()) {
+    const isSel = n.id === selectedId;
+    const onPath = pathNodeIds.has(n.id);
+    const dim = selectedId && !isSel && !isNeighbour(n.id) && !onPath;
+    g.setAttribute("opacity", dim ? "0.25" : "1");
+    const strokeColor = onPath ? "var(--accent)" : "var(--ink)";
+    const strokeWidth = onPath ? "2" : "1.2";
+    face.setAttribute("fill", isSel ? "var(--ink)" : "var(--face)");
+    face.setAttribute("stroke", strokeColor);
+    face.setAttribute("stroke-width", strokeWidth);
+    left.setAttribute("stroke", strokeColor);
+    left.setAttribute("stroke-width", strokeWidth);
+    right.setAttribute("stroke", strokeColor);
+    right.setAttribute("stroke-width", strokeWidth);
+    tag.style.display = (VIEW.k > LABEL_ZOOM || isSel) ? "" : "none";
+  }
 }
 
 let neighbourCache = { id: null, set: new Set() };
@@ -744,7 +793,7 @@ function renderIndex() {
 async function select(id, centre = false) {
   selectedId = id;
   renderIndex();
-  render();
+  restyle();
   if (centre && layout.has(id)) {
     const { gx, gy } = layout.get(id);
     const [x, y] = project(gx, gy);
@@ -1034,7 +1083,7 @@ function focusOnIds(ids) {
 function clearPathHighlight() {
   pathNodeIds = new Set();
   pathEdgeKeys = new Set();
-  render();
+  restyle();
 }
 
 function renderPathResult(fromId, steps) {
@@ -1221,13 +1270,13 @@ svg.addEventListener("wheel", (e) => {
   applyTransform();
   // A full render rebuilds every structure in the scene — thousands of SVG
   // nodes on a real graph. The transform alone handles the zoom; the only
-  // thing that actually changes with k is whether labels are drawn, so
-  // re-render only when that flips.
-  if (crossedLabelThreshold) render();
+  // thing that actually changes with k is whether labels are drawn, and
+  // restyle() flips that in place without rebuilding anything.
+  if (crossedLabelThreshold) restyle();
 }, { passive: false });
 svg.addEventListener("click", () => {
   if (consumeSuppressedClick()) return;
-  if (selectedId) { selectedId = null; renderIndex(); render(); renderEmptyDetail(); }
+  if (selectedId) { selectedId = null; renderIndex(); restyle(); renderEmptyDetail(); }
 });
 
 document.addEventListener("keydown", (e) => {
@@ -1235,7 +1284,7 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") e.target.blur();
     return;
   }
-  if (e.key === "Escape" && selectedId) { selectedId = null; renderIndex(); render(); renderEmptyDetail(); }
+  if (e.key === "Escape" && selectedId) { selectedId = null; renderIndex(); restyle(); renderEmptyDetail(); }
   if (e.key === "/") { e.preventDefault(); $("search").focus(); }
 });
 
