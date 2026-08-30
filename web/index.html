@@ -156,7 +156,11 @@ svg.dragging { cursor: grabbing; }
 }
 .tab:last-child { border-right: 0; }
 .tab[aria-selected="true"] { background: var(--ink); color: var(--paper); }
-.pane { padding: 10px 12px; }
+/* overflow-wrap is inherited, so this one rule covers every quote, answer,
+   and source line below it — including an unbroken URL from a markdown link
+   in a Roam quote, which would otherwise overflow the fixed-width panel and
+   get silently clipped by #body's overflow:hidden rather than wrap. */
+.pane { padding: 10px 12px; overflow-wrap: anywhere; }
 .pane h2 { font-size: 13px; margin: 0 0 2px; }
 .pane .eyebrow { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
 .pane p { margin: 6px 0; }

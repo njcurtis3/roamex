@@ -154,6 +154,17 @@ graph regardless, and switches the filter back to `all` if the path it found wou
 be hidden. If the two entities live in disconnected parts of your graph, it says so rather
 than guessing.
 
+### The Ask tab
+
+![The Ask tab, asked "What did I write about feedback loops in AI 2027?": the answer says the graph shows AI 2027 mentions feedback-loops-working-without-externally-provided-feedback but does not contain the actual text, flagged "graph did not have enough" and "93 triples shown", with one citation and its quoted source block including the block's full URL, wrapped rather than clipped](docs/viewer-ask.png)
+
+This is the shot worth reading closely, because it's the tool declining to bluff. The
+question asked for detail the graph doesn't have; instead of padding the answer with
+plausible-sounding filler, it says so directly, tags the answer `graph did not have enough`,
+and still shows its work — one real citation, the page and block it came from, and the exact
+quote it was grounded in. That's `sufficient: false` from the CLI's own output made visible:
+an honest gap is treated as a correct answer, not a failure to hide.
+
 ## Three things it refuses to do
 
 **Assert what your notes don't say.** An extracted relation must quote the block it came

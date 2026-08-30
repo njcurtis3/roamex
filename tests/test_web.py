@@ -267,6 +267,17 @@ def test_path_finder_route_and_tab_exist():
     assert 'id="panePath"' in html and 'id="pathForm"' in html
 
 
+def test_pane_wraps_long_unbroken_text():
+    """Regression, found 2026-08-30: a quote containing a markdown link's
+    unbroken URL overflowed the fixed-width right panel and was silently
+    clipped by #body's overflow:hidden instead of wrapping. overflow-wrap is
+    an inherited CSS property, so setting it once on .pane (the shared
+    ancestor of every quote/answer/source line) fixes all of them."""
+    html = (Path(__file__).parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+    pane_rule = html.split(".pane {", 1)[1].split("}", 1)[0]
+    assert "overflow-wrap" in pane_rule
+
+
 def test_path_edge_key_includes_block_uid():
     """Two distinct edges can share source, target, and predicate (the same
     relation stated in two different blocks). Without block_uid in the key,
