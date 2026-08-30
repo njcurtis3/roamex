@@ -242,10 +242,10 @@ kbd {
     </div>
     <div class="section-head" style="flex-wrap:wrap;row-gap:6px">
       <select id="sortMode" style="font-size:11px;padding:1px 4px">
+        <option value="degree-desc" selected>connections high→low</option>
+        <option value="degree-asc">connections low→high</option>
         <option value="name-asc">name a→z</option>
         <option value="name-desc">name z→a</option>
-        <option value="degree-desc">connections high→low</option>
-        <option value="degree-asc">connections low→high</option>
         <option value="type-asc">type</option>
       </select>
       <span id="typeChips" style="display:flex;flex-wrap:wrap;gap:3px"></span>
@@ -348,7 +348,7 @@ let selectedId = null;
 let originFilter = "all";
 let searchTerm = "";
 let layout = new Map();   // id -> {x, y}
-let sortMode = "name-asc";
+let sortMode = "degree-desc";
 let ALL_TYPES = [];        // every entity type present, TYPE_ORDER first
 let typeFilter = new Set();  // types currently shown in the index; starts full
 
