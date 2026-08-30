@@ -177,7 +177,58 @@ def extract_json(text: str) -> object:
             return json.loads(blob)
         except json.JSONDecodeError:
             continue
+    # A response cut off mid-object by max_tokens has no closing `]` at all,
+    # so it never made it into `candidates` above and would otherwise be
+    # thrown away along with every complete object that came before the cut.
+    # Salvage those: an extractor call fails or succeeds per block already,
+    # so returning the objects that did complete is strictly better than
+    # discarding a whole block's output over its last, truncated one.
+    start = text.find("[")
+    if start != -1:
+        healed = _heal_truncated_array(text[start:])
+        if healed:
+            return healed
     raise ValueError(f"no JSON found in model reply: {text[:200]!r}")
+
+
+def _heal_truncated_array(text: str) -> list | None:
+    """Recover the complete leading objects from a truncated `[...]` array.
+
+    Scans by brace depth (with string/escape awareness) rather than trying to
+    fix the trailing fragment itself — a half-written string or object is not
+    reliably repairable, but everything closed *before* it is exact JSON.
+    """
+    depth = 0
+    in_string = False
+    escape = False
+    obj_start = None
+    objects = []
+    for i, ch in enumerate(text):
+        if i == 0 and ch == "[":
+            continue
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            if depth == 0:
+                obj_start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and obj_start is not None:
+                try:
+                    objects.append(json.loads(text[obj_start : i + 1]))
+                except json.JSONDecodeError:
+                    pass
+                obj_start = None
+    return objects or None
 
 
 def load_dotenv(path: str = ".env") -> None:

@@ -42,6 +42,23 @@ def test_extract_json_survives_leading_prose():
     assert extract_json('Sure, here you go:\n{"a": 1}') == {"a": 1}
 
 
+def test_extract_json_heals_truncated_array():
+    truncated = (
+        '[\n  {"subject": "a", "predicate": "p", "object": "b"},\n'
+        '  {"subject": "c", "predicate": "p", "object": "d"},\n'
+        '  {"subject": "the author", "subject_type": "person", "predi'
+    )
+    assert extract_json(truncated) == [
+        {"subject": "a", "predicate": "p", "object": "b"},
+        {"subject": "c", "predicate": "p", "object": "d"},
+    ]
+
+
+def test_extract_json_truncated_with_no_complete_objects_raises():
+    with pytest.raises(ValueError):
+        extract_json('[\n  {"subject": "a", "predi')
+
+
 def test_grounded_triples_are_kept(reply):
     triples = parse(reply)
     pairs = {(t.subject, t.predicate, t.object) for t in triples}
