@@ -1,23 +1,17 @@
 # roamex
 
-Turns your Roam Research graph into a queryable knowledge graph, where every answer cites
-the block it came from.
+Turns a Roam Research graph into a queryable knowledge graph where every answer cites the
+block it came from.
 
-roamex reads your Roam graph directly — pages, blocks, `[[links]]`, `#tags`,
-`attribute:: value` — deterministically, no model involved. Then a language model reads the
-*prose* inside your blocks and extracts the relations you stated but never linked:
-
-> "Started at Acme in 2019, reporting to Dana."
-
-No `[[Acme]]`, no `[[Dana]]`, so Roam's own graph shows nothing. roamex turns this into
-`author --works_at--> Acme` and `author --reports_to--> Dana Whitfield`, attached to your
-existing pages, each edge stamped with the block uid that produced it.
+A Roam export is already a graph: pages, blocks, `[[links]]`, `#tags`, and `attribute:: value`
+pairs. Stage one reads that structure directly, with no model involved. Stage two sends block
+prose to a language model, which extracts the relations the author stated in a sentence but
+never linked. A block reading "Started at Acme in 2019, reporting to Dana" contains no
+`[[Acme]]` and no `[[Dana]]`, so Roam's own graph shows nothing. roamex turns it into
+`author --works_at--> Acme` and `author --reports_to--> Dana Whitfield`. Every node and every
+edge carries the uid of the block that produced it, so any answer traces back to a note.
 
 ```
-$ python -m src.cli pull
-pulling graph 'your-graph' (depth=20)...
-  wrote 1,487 pages to exports/roam.json
-
 $ python -m src.cli query "who wrote the Kestrel parser?"
 
 Dana Whitfield wrote the Kestrel parser. She is the data lead at Rivet Labs,
@@ -29,40 +23,50 @@ sufficient: true   triples shown: 14
 citations:
   Dana Whitfield --wrote--> Kestrel parser      [page "Dana Whitfield", block blk-008]
   Dana Whitfield --works_at--> Rivet Labs       [page "Project Halyard", block blk-003]
-  Rivet Labs --builds_tooling_for--> Project Halyard  [page "Rivet Labs", block blk-009]
 ```
 
-## Pipeline
+## Prerequisites
 
-| Stage | What it does | Model? |
-|---|---|---|
-| `pull` | fetch your graph live from Roam's API | no |
-| `parse` | pulled graph → base graph from links, tags, attributes | no |
-| `extract` | block prose → candidate triples, each quoting its source | yes |
-| `resolve` | "Dana" / "D. Whitfield" / "Dana Whitfield" → one entity | yes, only on ambiguity |
-| `assemble` | fold triples into the base graph, keep all provenance | no |
-| `query` | question → k-hop subgraph → answer with citations | yes |
-| `eval` | precision/recall, over-merge rate, provenance coverage | no |
+- Python 3.13, per the header of `requirements.txt`.
+- `pytest` is the only installed dependency. The pipeline itself runs on the standard library:
+  exports are JSON, the store is `sqlite3`, and the model call is one POST through `urllib`.
+- An OpenRouter API key. The `extract`, `resolve`, and `query` stages call
+  [OpenRouter](https://openrouter.ai). Every other command runs offline.
+- A Roam export as JSON at `exports/roam.json`, or a `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME`
+  for the `pull` command. Take the token from the API tokens section of the graph's own
+  settings in Roam. roamex cannot generate one.
 
-Models run through [OpenRouter](https://openrouter.ai), tiered by stage. Extraction uses a
-cheap model — every triple must quote its source or get dropped, so junk is discarded rather
-than trusted. Resolution uses a stronger one, because a wrong merge is silent and
-unrecoverable.
+## Repository Layout
 
-```bash
-python -m src.cli models              # live catalog, cheapest first
-python -m src.cli models --match qwen
-```
+| Path | Purpose |
+| --- | --- |
+| `src/cli.py` | Entry point, one subcommand per stage |
+| `src/models.py` | `Node`, `Edge`, `Triple`, and `Provenance`, the contract between stages |
+| `src/roam/` | Export loading, the deterministic parse, and the live API pull |
+| `src/pipeline/` | One module per stage: extract, resolve, assemble, query |
+| `src/llm/` | OpenRouter client, versioned prompts, and the model catalog |
+| `src/store/` | SQLite persistence and schema, the only code here that knows SQL |
+| `src/eval/` | Precision, recall, over-merge rate, provenance coverage, grounding |
+| `web/` | Local read-only viewer, documented in `web/README.md` |
+| `fixtures/` | Synthetic Roam export and recorded model replies that every test reads |
+| `eval/gold/` | Hand-labelled answers to score a run against |
+| `tests/` | pytest suite, offline |
+| `docs/` | Screenshots this README links |
 
-Prices come from OpenRouter at runtime, never hardcoded.
+## Local Development
 
-## Quick start
+Install the dependency and create the config file:
 
 ```bash
 python -m pip install -r requirements.txt
-cp .env.example .env                     # add your OpenRouter key, ROAM_API_TOKEN, ROAM_GRAPH_NAME
+cp .env.example .env      # add OPENROUTER_API_KEY, and the Roam pair if you use pull
+```
 
-python -m src.cli pull                                        # fetches exports/roam.json live
+Run the pipeline. Each stage writes a file under `work/` and the next stage reads it back, so
+a stage is resumable and inspectable on its own:
+
+```bash
+python -m src.cli pull                                        # writes exports/roam.json
 python -m src.cli pages   --export exports/roam.json          # find a page to start on
 python -m src.cli parse   --export exports/roam.json --subtree "Project X"
 python -m src.cli extract --export exports/roam.json --subtree "Project X" --dry-run
@@ -72,12 +76,11 @@ python -m src.cli assemble
 python -m src.cli query "what depends on the old parser?"
 ```
 
-- `ROAM_API_TOKEN` — from your graph's own settings in Roam, under "API tokens".
-- `ROAM_GRAPH_NAME` — the graph's name as it appears in its URL.
-- No token yet? Skip `pull` and drop a manual export instead (JSON, not Markdown, from your
-  graph's menu) at `exports/roam.json` — every other command works unchanged.
+Without a Roam API token, skip `pull` and drop a manual JSON export at `exports/roam.json`.
+Every other command works unchanged.
 
-`--dry-run` prices an extraction run before you spend anything:
+`--dry-run` reports the call count and a priced estimate without making any calls. Prices come
+from the OpenRouter catalog at runtime, so this repo hardcodes no price list:
 
 ```
 375 blocks qualify for extraction
@@ -86,93 +89,97 @@ python -m src.cli query "what depends on the old parser?"
   estimated cost: $0.0122  (in $0.0049 + out $0.0073)
 ```
 
-Start with `--subtree` on a small page first. At these prices a full graph runs for pocket
-change, but a bad prompt is cheaper to catch on 59 blocks than on 4,757 — and a full run
-ships your entire knowledge base to a third-party model provider in one go.
-
-Everything except `pull`, `extract`, `resolve`, and `query` runs offline, no key required.
-
-## Viewer
-
-```bash
-python web/serve.py          # opens 127.0.0.1:8790
-```
-
-![The roamex viewer: an index on the left, an isometric map of the graph in the middle, and a detail panel on the right showing every source block behind the selected entity](docs/viewer.png)
-
-A local, read-only viewer served straight from `work/graph.db`.
-
-- **Index** (left) — every entity, filterable by type and sortable by name, connection count,
-  or type. Daily notes fold into one collapsible group so they don't drown out everything
-  else.
-- **Map** (middle) — every entity as an isometric structure. **Height is degree**, so the
-  busiest entities stand tallest and sit nearest the centre. **Solid outline = you wrote that
-  link by hand** in Roam; **dashed = a model inferred it** from your prose. Drag to pan, wheel
-  to zoom.
-- **Detail** — what the selected entity says, what refers to it, and every source block
-  behind each claim.
-- **Path** — shortest chain connecting any two entities, with the connecting edges
-  highlighted on the map.
-- **Ask** — a grounded question against the whole graph.
-- **About** — legend and counts.
-
-### Path — shortest connection between two entities
-
-![The Path tab: from "AI 2027" to "working-without-externally-provided-feedback", found directly connected by a "mentions" edge, with the connecting path highlighted in accent orange across the isometric map](docs/viewer-path.png)
-
-Pure client-side breadth-first search over the graph already loaded in the page — free,
-instant, no model call. Works across the whole graph regardless of the origin filter, and
-switches the filter back to "all" if it would otherwise hide the path it found.
-
-### Ask — grounded question answering
-
-![The Ask tab, asked "What did I write about feedback loops in AI 2027?": the answer says the graph shows AI 2027 mentions feedback-loops-working-without-externally-provided-feedback but does not contain the actual text, flagged "graph did not have enough" and "93 triples shown", with one citation and its quoted source block including the block's full URL, wrapped rather than clipped](docs/viewer-ask.png)
-
-The one feature here that costs a model call. Answers are built only from triples in your
-graph, and every claim cites the page and block it came from. When the graph doesn't have
-enough to answer, it says so — `sufficient: false` — rather than padding the answer with
-plausible-sounding filler.
-
-## What it won't do
-
-- **Assert what your notes don't say.** An extracted relation must quote the block it came
-  from, verbatim, or it's dropped.
-- **Merge two people who share a name without evidence.** A missed merge just leaves a
-  duplicate node you can see and fix; an over-merge fuses two entities' facts with no signal
-  it happened. Resolution fails closed, and `eval` reports the over-merge rate.
-- **Answer without showing its work.** Query reasons over a serialized subgraph and nothing
-  else. A cited edge that wasn't actually shown to the model is flagged, not returned clean.
-
-## Privacy
-
-- `exports/`, `work/`, and gold sets are gitignored — nothing derived from your notes is
-  committed.
-- Block text is sent to whichever model you point OpenRouter at. There's no content filter
-  yet; if you need one, it belongs in `blocks_for_extraction`.
-- `pull` sends your Roam API token to Roam's own API and nowhere else.
-
-## Testing
+Run the test suite:
 
 ```bash
 python -m pytest
 ```
 
-Every test runs offline. Each model-calling stage splits into a `run()` that hits the network
-and a `parse_*_response()` that doesn't — tests only exercise the second, against recorded
-replies in `fixtures/openrouter/`.
+Every test runs offline. Each model-backed stage splits into a `run()` that calls the network
+and a `parse_*_response()` that does not. The tests exercise only the second half, against the
+recorded replies in `fixtures/openrouter/`.
 
-## Status
+## Pipeline stages
 
-- Proven end-to-end on real data: a 1,000-block sample from a ~1,500-page graph produced 594
-  triples (0 failures), assembled into a 2,082-node / 3,211-edge graph with 100% provenance
-  coverage, and queried successfully at that scale.
-- `pull` verified against a live graph with 0 block-level mismatches against a manual export.
-- The full graph (~4,750 extractable blocks) is priced (~$0.16 at current rates) but not yet
-  run end-to-end.
-- Two known, unfixed limits at scale: a blocking hub-node artifact in `resolve` (capped, not
-  eliminated), and a redundant double graph-load per query (~10% of latency).
-- The viewer is confirmed rendering the real 2,082-node graph and is collision-free at full
-  scale. One rough edge: structure labels overlap at full-graph zoom — the index or Detail
-  panel is the reliable way to read a specific entity at that density.
+| Stage | What it does | Model call |
+| --- | --- | --- |
+| `pull` | Fetches the graph from Roam's HTTP API into an export file | no |
+| `pages` | Lists page titles and block counts, so you can pick a subtree | no |
+| `parse` | Reads links, tags, and attributes into a base graph | no |
+| `extract` | Reads block prose and returns candidate triples, each quoting its block | yes |
+| `resolve` | Merges duplicate mentions such as `Dana` and `Dana Whitfield` | on ambiguity |
+| `assemble` | Folds triples into the base graph and writes `work/graph.db` | no |
+| `query` | Expands a k-hop subgraph around the question and answers with citations | yes |
+| `eval` | Scores extraction, resolution, provenance coverage, and grounding | only with `--gold` questions |
+| `models` | Prints the live OpenRouter catalog, cheapest first | no |
+| `stats` | Prints what the store holds | no |
 
-See `CLAUDE.md` for the full scale write-up.
+Each stage picks its own model, tiered by how checkable its output is. Extraction is
+high-volume and independently verified, because every triple must quote its source block or
+get dropped, so a cheap model is affordable. Resolution is low-volume and unverifiable after
+the fact, so it takes a stronger model. `src/llm/openrouter.py` holds the defaults:
+`qwen/qwen3.7-flash` for extract, and `google/gemini-3.6-flash` for resolve and query. Override
+any of them with `ROAMEX_MODEL_EXTRACT`, `ROAMEX_MODEL_RESOLVE`, and `ROAMEX_MODEL_QUERY` in
+`.env`, or per run with `--model`.
+
+## Viewer
+
+```bash
+python web/serve.py          # opens 127.0.0.1:8790
+python web/serve.py --db work/graph.db --port 8791 --no-open
+```
+
+![The roamex viewer: an index on the left, an isometric map of the graph in the middle, and a detail panel on the right showing every source block behind the selected entity](docs/viewer.png)
+
+A read-only viewer served from `work/graph.db`. Run `assemble` first. Entities appear as
+isometric structures whose height encodes degree, so the busiest entities stand tallest. A
+solid outline marks a link written by hand in Roam. A dashed outline marks a link a model
+inferred from prose. The right panel carries four tabs: Detail, [Path](docs/viewer-path.png),
+[Ask](docs/viewer-ask.png), and About. Path runs a breadth-first search in the browser over the
+graph already loaded, at no cost. Ask is the one feature in the viewer that spends a model
+call. Read `web/README.md` for the routes, the design language, and the test coverage.
+
+## Deployment
+
+roamex has no deploy pipeline, no CI configuration, and no hosted component. The CLI and the
+viewer both run on a local machine against files under `work/`. `web/serve.py` binds
+`127.0.0.1`, and hosting it anywhere reachable would publish a personal knowledge base with no
+authentication in front of it.
+
+## Notes and gotchas
+
+- Never commit the export or anything derived from it. `exports/`, `work/`, and unlabelled
+  gold sets are gitignored. A note committed once stays in every clone forever.
+- `extract` sends block text to a third-party inference provider. A full-graph run ships the
+  whole knowledge base in one go, so prove the prompt and the schema on one `--subtree` first.
+- `parse_extraction_response` drops any triple whose quote is not a substring of its source
+  block. Relaxing that check raises recall and admits claims the notes never made.
+- An over-merge in `resolve` welds two entities together and leaves no signal that they were
+  ever separate. A missed merge leaves a visible duplicate node instead. `eval` reports
+  `over_merge_rate`, which is the number to watch after changing the resolve model.
+- A reasoning model can spend its whole `max_tokens` budget on reasoning and return empty
+  content, which looks exactly like a broken extractor. `extract.run()` passes
+  `reasoning={"enabled": False}` for that reason. A different reasoning model needs the same
+  override or a larger `max_tokens`.
+- `resolve` blocks candidate names by shared tokens, and one common word acts as a hub that
+  bridges unrelated names into a single cluster. `MAX_ARBITRATION_CLUSTER` in
+  `src/pipeline/resolve.py` caps the symptom at 25 members by leaving such a cluster unmerged.
+  The blocking rule itself is unchanged.
+- `pull` requests a fixed nesting depth, 20 by default. `_selector()` in `src/roam/api.py`
+  raises no warning when a graph nests deeper, so blocks below that depth go missing without
+  a message.
+- Prompts are versioned in `src/llm/prompts.py`, and the version string is written into the
+  provenance of every fact. Change a prompt without bumping its version, and no later run can
+  tell which prompt produced a given fact.
+- Every node and edge carries a block uid. `Provenance` raises without one, and
+  `GraphStore.load()` refuses to return an edge that has none.
+- Nothing in `src/` imports from `web/`. Delete `web/` and the pipeline still runs.
+
+## Further reading
+
+- [CLAUDE.md](CLAUDE.md) — architecture, the scale measurements taken so far, and the
+  constraints behind each design decision
+- [web/README.md](web/README.md) — viewer routes, design language, and what the tests cover
+- The module docstring in [src/roam/api.py](src/roam/api.py) — where the Roam API endpoint
+  paths and headers came from, and which of them a live run has confirmed
+- [OpenRouter](https://openrouter.ai) — the model gateway every model-backed stage calls
