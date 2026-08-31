@@ -228,6 +228,27 @@ kbd {
 }
 .empty { padding: 20px 12px; color: var(--muted); }
 
+/* A native title/SVG-title tooltip is OS chrome — plain white box in Chrome,
+   a different plain box in Firefox, unstyleable in either. Every hoverable
+   thing that wants a tooltip sets data-tip instead, and #tooltip (built and
+   positioned in JS) renders it in the same paper/ink/hard-shadow grammar as
+   the rest of the UI, consistently across browsers. */
+#tooltip {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  max-width: 280px;
+  padding: 5px 7px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1.5px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+  font: 11px/1.4 "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-line;
+  display: none;
+}
+#tooltip.show { display: block; }
+
 @media (max-width: 900px) {
   #index { display: none; }
   #panel { flex-basis: 300px; width: 300px; }
@@ -248,13 +269,13 @@ kbd {
     </select>
   </label>
   <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px"
-    title="Hides inferred edges below this confidence, and fades the ones that remain. Roam-link edges are always confidence 1.0, so this never touches them.">
+    data-tip="Hides inferred edges below this confidence, and fades the ones that remain. Roam-link edges are always confidence 1.0, so this never touches them.">
     min confidence
     <input type="range" id="confidenceFilter" min="0" max="1" step="0.05" value="0" style="width:70px">
     <span id="confidenceValue" style="min-width:2.5em">0.00</span>
   </label>
   <button id="refit">Refit</button>
-  <button id="themeBtn" title="Toggle theme">◐</button>
+  <button id="themeBtn" data-tip="Toggle theme">◐</button>
 </div>
 
 <div id="body">
@@ -301,7 +322,7 @@ kbd {
         <datalist id="nodeNames"></datalist>
         <div style="display:flex;gap:6px">
           <button class="primary" type="submit" id="pathBtn" style="flex:1 1 auto">Find path</button>
-          <button type="button" id="pathSwap" title="Swap from/to">⇄</button>
+          <button type="button" id="pathSwap" data-tip="Swap from/to">⇄</button>
           <button type="button" id="pathClear">Clear</button>
         </div>
       </form>
@@ -335,11 +356,69 @@ kbd {
   <div class="stats" id="stats" style="margin-left:auto"><span>loading…</span></div>
 </div>
 
+<div id="tooltip" role="tooltip"></div>
+
 <script>
 "use strict";
 
 const SVGNS = "http://www.w3.org/2000/svg";
 const $ = (id) => document.getElementById(id);
+
+/* ---------- custom tooltips --------------------------------------------
+   Delegated so it works for the ~8,000 map nodes without a listener per
+   node: anything carrying data-tip (HTML or SVG — SVG elements accept
+   data-* attributes fine) gets a themed tooltip, keyboard-focusable
+   elements too, via the same mechanism a browser's own title would use. */
+(function setupTooltips() {
+  const el = $("tooltip");
+  let target = null;
+
+  function place(x, y) {
+    const pad = 14;
+    el.style.left = "0px"; el.style.top = "0px"; // measure without clipping
+    const r = el.getBoundingClientRect();
+    let left = x + pad, top = y + pad;
+    if (left + r.width > innerWidth) left = x - r.width - pad;
+    if (top + r.height > innerHeight) top = y - r.height - pad;
+    el.style.left = `${Math.max(0, left)}px`;
+    el.style.top = `${Math.max(0, top)}px`;
+  }
+  function show(t, x, y) {
+    target = t;
+    el.textContent = t.dataset.tip;
+    el.classList.add("show");
+    place(x, y);
+  }
+  function hide() {
+    target = null;
+    el.classList.remove("show");
+  }
+
+  document.addEventListener("mouseover", (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (!t || t === target) return;
+    show(t, e.clientX, e.clientY);
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (target) place(e.clientX, e.clientY);
+  });
+  document.addEventListener("mouseout", (e) => {
+    if (!target) return;
+    const to = e.relatedTarget;
+    if (to && target.contains(to)) return;
+    hide();
+  });
+  // Keyboard/focus path — map structures are tabindex="0" role="button".
+  document.addEventListener("focusin", (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (!t) return;
+    const r = t.getBoundingClientRect();
+    show(t, r.left + r.width / 2, r.bottom);
+  });
+  document.addEventListener("focusout", (e) => {
+    if (target && e.target === target) hide();
+  });
+})();
 
 // Two-letter code per entity type for the index chip and the node badge —
 // the Atlas grammar's "code chip + readable short name".
@@ -512,12 +591,14 @@ function render() {
     g.setAttribute("tabindex", "0");
     g.setAttribute("role", "button");
     g.setAttribute("aria-label", `${n.type}: ${n.name}, ${n.degree} connections`);
-    // SVG tooltips are a <title> child, not a title attribute.
-    const tip = document.createElementNS(SVGNS, "title");
-    tip.textContent =
+    // data-tip, not an SVG <title> child — the browser's native tooltip
+    // can't be styled in either Chrome or Firefox; the delegated handler
+    // above renders this in the app's own paper/ink grammar instead.
+    g.setAttribute(
+      "data-tip",
       `${n.name}\n${codeTitle(n.type)}\n${n.degree} connection${n.degree === 1 ? "" : "s"}` +
-      `\n${n.origins.includes("roam-link") ? "Written as a link in Roam" : "Inferred by a model from prose"}`;
-    g.appendChild(tip);
+      `\n${n.origins.includes("roam-link") ? "Written as a link in Roam" : "Inferred by a model from prose"}`
+    );
 
     const isSel = n.id === selectedId;
     const onPath = pathNodeIds.has(n.id);
@@ -697,11 +778,11 @@ function makeRow(n) {
     <span class="row-meta"></span>`;
   const code = b.querySelector(".row-code");
   code.textContent = CODE[n.type] || "??";
-  code.title = codeTitle(n.type);
+  code.dataset.tip = codeTitle(n.type);
   b.querySelector(".row-name").textContent = n.name;
   const meta = b.querySelector(".row-meta");
   meta.textContent = String(n.degree);
-  meta.title = `${n.degree} connection${n.degree === 1 ? "" : "s"}`;
+  meta.dataset.tip = `${n.degree} connection${n.degree === 1 ? "" : "s"}`;
   b.addEventListener("click", () => select(n.id, true));
   return b;
 }
@@ -722,7 +803,7 @@ function renderTypeChips() {
     b.type = "button";
     b.className = "chip" + (typeFilter.has(t) ? " on" : "");
     b.textContent = CODE[t] || t.slice(0, 2).toUpperCase();
-    b.title = `${t} — click to ${typeFilter.has(t) ? "hide" : "show"} in the index`;
+    b.dataset.tip = `${t} — click to ${typeFilter.has(t) ? "hide" : "show"} in the index`;
     b.addEventListener("click", () => {
       if (typeFilter.has(t)) typeFilter.delete(t); else typeFilter.add(t);
       renderTypeChips();
@@ -766,11 +847,11 @@ function renderIndex() {
     head.innerHTML = `<span class="row-code">DN</span>
       <span class="row-name"></span>
       <span class="row-meta"></span>`;
-    head.querySelector(".row-code").title =
+    head.querySelector(".row-code").dataset.tip =
       "DN — daily note\nA Roam daily page, titled with its date. Folded here because they're numerous and say little individually.";
     head.querySelector(".row-name").textContent = `${open ? "▾" : "▸"} Daily Notes`;
     head.querySelector(".row-meta").textContent = String(daily.length);
-    head.title = `${daily.length} daily notes — click to ${open ? "collapse" : "expand"}`;
+    head.dataset.tip = `${daily.length} daily notes — click to ${open ? "collapse" : "expand"}`;
     head.addEventListener("click", () => { dailyOpen = !open; renderIndex(); });
     list.appendChild(head);
 
@@ -822,7 +903,7 @@ function renderDetail(n) {
 
   const origins = [...new Set(n.provenance.map(p => p.origin))];
   const head = document.createElement("div");
-  head.innerHTML = `<div class="eyebrow" title="${escapeHtml(codeTitle(n.type))}">${CODE[n.type] || "??"} · ${escapeHtml(n.type)} · pinned</div>`;
+  head.innerHTML = `<div class="eyebrow" data-tip="${escapeHtml(codeTitle(n.type))}">${CODE[n.type] || "??"} · ${escapeHtml(n.type)} · pinned</div>`;
   const h2 = document.createElement("h2");
   h2.textContent = n.name;
   head.appendChild(h2);
@@ -1325,7 +1406,7 @@ function makeCopyButton(source) {
   b.type = "button";
   b.className = "copy-btn";
   b.textContent = "copy";
-  b.title = "Copy this citation's quote and source";
+  b.dataset.tip = "Copy this citation's quote and source";
   b.addEventListener("click", (ev) => {
     ev.stopPropagation();
     copyToClipboard(citationText(source)).then(() => {
@@ -1367,7 +1448,7 @@ function renderAbout() {
   const types = [...new Set([...TYPE_ORDER, ...Object.keys(byType)])].filter(t => byType[t]);
 
   const legendRows = types.map(t => `
-    <tr title="${escapeHtml(TYPE_NOTE[t] || "Unknown type.")}">
+    <tr data-tip="${escapeHtml(TYPE_NOTE[t] || "Unknown type.")}">
       <td style="padding:2px 8px 2px 0;vertical-align:top">
         <span class="row-code" style="border-color:var(--ink)">${CODE[t] || "??"}</span>
       </td>
