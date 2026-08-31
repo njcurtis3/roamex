@@ -11,7 +11,10 @@ test in this app exercises the second one.
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 from ..llm import prompts
 from ..llm.openrouter import complete, extract_json, model_for
@@ -90,17 +93,32 @@ def _valid_type(raw: object) -> str:
     return t if t in prompts.ENTITY_TYPES else "concept"
 
 
-def run(blocks: list[dict[str, str]], *, model: str | None = None, verbose: bool = True):
+def run(
+    blocks: list[dict[str, str]],
+    *,
+    model: str | None = None,
+    verbose: bool = True,
+    checkpoint_path: Path | None = None,
+    checkpoint_every: int = 50,
+):
     """Extract over a list of blocks from `roam.parse.blocks_for_extraction`.
 
     One call per block. Batching several blocks into one call is cheaper and is
     the obvious next optimization — it is not done yet because per-block calls
     keep provenance trivially correct, and getting provenance wrong is the one
     error this app cannot recover from later.
+
+    If `checkpoint_path` is given, progress is flushed there every
+    `checkpoint_every` blocks. Extraction costs real, non-refundable money per
+    call — a run killed from outside (a closed session, a sleeping machine,
+    not a code error) used to lose every call made so far, because nothing
+    was written to disk until the very end. `cli.cmd_extract` reads this file
+    back to resume rather than re-pay for already-completed blocks.
     """
     model = model or model_for("extract")
     triples: list[Triple] = []
     failures: list[dict[str, str]] = []
+    done_uids: list[str] = []
 
     for i, block in enumerate(blocks, 1):
         user = prompts.EXTRACT_USER.format(
@@ -111,7 +129,7 @@ def run(blocks: list[dict[str, str]], *, model: str | None = None, verbose: bool
                 prompts.EXTRACT_SYSTEM,
                 user,
                 model,
-                max_tokens=2048,
+                max_tokens=4096,
                 reasoning={"enabled": False},
             )
             got = parse_extraction_response(
@@ -128,5 +146,38 @@ def run(blocks: list[dict[str, str]], *, model: str | None = None, verbose: bool
             failures.append({"uid": block["uid"], "error": str(exc)})
             if verbose:
                 print(f"  [{i}/{len(blocks)}] {block['uid']}: FAILED — {exc}")
+        done_uids.append(block["uid"])
+
+        if checkpoint_path and (i % checkpoint_every == 0 or i == len(blocks)):
+            _write_checkpoint(checkpoint_path, triples, failures, done_uids)
 
     return triples, failures
+
+
+def _write_checkpoint(
+    path: Path,
+    triples: list[Triple],
+    failures: list[dict[str, str]],
+    done_uids: list[str],
+) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "done_uids": done_uids,
+                "triples": [asdict(t) for t in triples],
+                "failures": failures,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def load_checkpoint(path: Path) -> tuple[list[Triple], list[dict[str, str]], set[str]]:
+    """Read back a checkpoint written by `run()`. Pure; no network."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    triples = [
+        Triple(**{**t, "provenance": Provenance(**t["provenance"])})
+        for t in raw["triples"]
+    ]
+    return triples, raw["failures"], set(raw["done_uids"])

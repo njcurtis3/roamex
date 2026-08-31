@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from src.llm.openrouter import _completion_from, extract_json
-from src.models import ORIGIN_LLM
-from src.pipeline.extract import parse_extraction_response
+from src.llm.openrouter import _completion_from, _is_retryable_body_error, extract_json
+from src.models import ORIGIN_LLM, Provenance, Triple
+from src.pipeline.extract import _write_checkpoint, load_checkpoint, parse_extraction_response
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "openrouter" / "extract_response.json"
 
@@ -111,3 +111,45 @@ def test_empty_array_is_a_valid_answer():
 def test_non_array_reply_raises():
     with pytest.raises(ValueError):
         parse('{"subject": "A"}')
+
+
+def test_retryable_body_error_recognizes_the_504_abort_shape():
+    """Seen for real during an OpenRouter rate-limit window: a 200 response
+    whose body carries the failure instead of an HTTP error status. Before
+    this classifier existed, that shape skipped retry entirely."""
+    assert _is_retryable_body_error({"message": "The operation was aborted", "code": 504})
+    assert _is_retryable_body_error({"message": "rate limited, please retry", "code": 429})
+
+
+def test_non_retryable_body_error_is_not_retried():
+    assert not _is_retryable_body_error({"message": "invalid model id", "code": 400})
+    assert not _is_retryable_body_error("just a string, not a dict")
+
+
+def test_checkpoint_round_trip(tmp_path):
+    path = tmp_path / "extract_checkpoint.json"
+    triple = Triple(
+        subject="A",
+        subject_type="concept",
+        predicate="p",
+        object="B",
+        object_type="concept",
+        subject_description="",
+        object_description="",
+        confidence=1.0,
+        provenance=Provenance(
+            block_uid="blk-1",
+            page_title="Page",
+            origin=ORIGIN_LLM,
+            extracted_at="2026-01-01T00:00:00+00:00",
+            model="m",
+            prompt_version="v1",
+            quote=None,
+        ),
+    )
+    _write_checkpoint(path, [triple], [{"uid": "blk-2", "error": "boom"}], ["blk-1", "blk-2"])
+
+    triples, failures, done_uids = load_checkpoint(path)
+    assert triples == [triple]
+    assert failures == [{"uid": "blk-2", "error": "boom"}]
+    assert done_uids == {"blk-1", "blk-2"}

@@ -124,6 +124,20 @@ def cmd_extract(args) -> None:
     if args.limit:
         blocks = blocks[: args.limit]
 
+    checkpoint_path = WORK / "extract_checkpoint.json"
+    prior_triples: list[Triple] = []
+    prior_failures: list[dict[str, str]] = []
+    if args.resume and checkpoint_path.exists():
+        prior_triples, prior_failures, done_uids = extract_stage.load_checkpoint(checkpoint_path)
+        before = len(blocks)
+        blocks = [b for b in blocks if b["uid"] not in done_uids]
+        print(
+            f"  resuming: {len(done_uids)} blocks already done "
+            f"({before - len(blocks)} skipped), {len(blocks)} remaining"
+        )
+    elif args.resume:
+        print(f"  --resume given but no {checkpoint_path} found — running fresh")
+
     print(f"{len(blocks)} blocks qualify for extraction")
     if args.dry_run:
         # The cost preview. Look at this before pointing the stage at a real
@@ -153,9 +167,16 @@ def cmd_extract(args) -> None:
             print(f"    {b['uid']}: {b['text'][:90]}")
         return
 
-    triples, failures = extract_stage.run(blocks, model=args.model)
+    triples, failures = extract_stage.run(
+        blocks, model=args.model, checkpoint_path=checkpoint_path
+    )
+    triples = prior_triples + triples
+    failures = prior_failures + failures
     _dump(TRIPLES, [{**asdict(t)} for t in triples])
-    print(f"  {len(triples)} triples from {len(blocks)} blocks, {len(failures)} failures")
+    print(f"  {len(triples)} triples, {len(failures)} failures")
+    # A run that finished on its own has nothing left to resume from.
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
     # Always write, even empty: a stale failures file from a prior broken run
     # must not sit there looking current next to a clean triples.json.
     failures_path = WORK / "extract_failures.json"
@@ -351,6 +372,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--model", default=None)
     p.add_argument("--dry-run", action="store_true", help="count and cost, no calls")
+    p.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue an extract killed mid-run instead of re-paying for it",
+    )
     p.set_defaults(func=cmd_extract)
 
     p = sub.add_parser("resolve", help="merge duplicate entity mentions")

@@ -113,7 +113,18 @@ def complete(
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
-            return _completion_from(body, model)
+            err = body.get("error")
+            # A transient upstream failure can come back as a 200 with the
+            # error embedded in the body instead of an HTTP error status —
+            # seen for real as {'message': 'The operation was aborted',
+            # 'code': 504} during an OpenRouter rate-limit window. That never
+            # raises HTTPError, so it used to skip retry entirely and burn
+            # the block permanently on the very first hiccup. Route it
+            # through the same backoff as a 429 instead.
+            if err and _is_retryable_body_error(err):
+                last = OpenRouterError(f"transient upstream error: {err}")
+            else:
+                return _completion_from(body, model)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:400]
             # 4xx other than rate-limit is a bad request; retrying re-sends the
@@ -126,6 +137,22 @@ def complete(
         if attempt < retries - 1:
             time.sleep(2**attempt)
     raise last or OpenRouterError("request failed")
+
+
+def _is_retryable_body_error(err: object) -> bool:
+    """Is an error embedded in a 200 response body transient?
+
+    Only 429/5xx-shaped and abort/timeout-worded errors get the retry
+    budget — a genuinely bad request (bad model id, malformed payload) would
+    just fail the same way three times and cost wall-clock for nothing.
+    """
+    if not isinstance(err, dict):
+        return False
+    code = err.get("code")
+    if isinstance(code, int) and (code == 429 or 500 <= code < 600):
+        return True
+    message = str(err.get("message", "")).lower()
+    return any(w in message for w in ("abort", "timeout", "timed out", "rate"))
 
 
 def _completion_from(body: dict, model: str) -> Completion:
