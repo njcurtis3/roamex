@@ -255,6 +255,32 @@ def test_hallucinated_citation_is_flagged_not_silently_accepted():
     assert answer.invalid_citations == ["e99"]
 
 
+def test_truncated_reply_salvages_the_partial_answer_instead_of_raising():
+    """Reproduces a real reply from 2026-08-30: max_tokens cut the reply off
+    mid-string, inside the `"answer"` value, before any `[` ever appeared —
+    so extract_json's array healer has nothing to salvage and every real
+    query before this fix raised straight through as "Query failed: no JSON
+    found...", discarding an answer the model had mostly finished writing."""
+    raw = (
+        '{\n  "answer": "Based on the provided graph, **AI 2027** is a subject '
+        'read [e92, e93] by the author, and serves as the author\'s best gu'
+    )
+    answer = parse_query_response(raw, {}, "what can you tell me about AI 2027?", "m")
+    assert answer.answer.startswith("Based on the provided graph, **AI 2027**")
+    assert "cut off" in answer.answer
+    assert answer.sufficient is False
+    assert answer.citations == []
+
+
+def test_truncated_reply_with_no_answer_field_still_raises():
+    """A reply cut off before `"answer"` even started has nothing to salvage —
+    this should still fail loudly (caught by ask()'s own guard) rather than
+    silently returning an empty answer."""
+    raw = '{\n  "citat'
+    with pytest.raises(ValueError):
+        parse_query_response(raw, {}, "q", "m")
+
+
 def test_provenance_coverage_is_total(base, triples):
     graph = assemble(base, triples, ResolutionMap(mapping={"dana": "Dana Whitfield"}))
     report = score.score_provenance(graph)

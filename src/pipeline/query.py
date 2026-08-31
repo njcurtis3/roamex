@@ -13,6 +13,7 @@ cites an edge it wasn't shown is flagged rather than returned clean.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 
@@ -86,6 +87,29 @@ def _repair_bare_citations(text: str) -> str:
     return _BARE_CITATION_RE.sub(fix_array, text)
 
 
+# extract_json's own truncation recovery (openrouter._heal_truncated_array)
+# only salvages a truncated `[...]` array — exactly what extraction returns,
+# but query's reply is a single top-level `{...}` object, and a verbose
+# answer plus reasoning can run out of budget mid-*string*, before the
+# "citations" array (or any `[`) ever appears. That leaves nothing for the
+# array healer to find. Found for real 2026-08-30: a reply cut off inside
+# the "answer" value raised straight through to the CLI/viewer as
+# "Query failed: no JSON found...", discarding a mostly-written answer that
+# was still worth showing.
+_ANSWER_FIELD_RE = re.compile(r'"answer"\s*:\s*"((?:[^"\\]|\\.)*)')
+
+
+def _salvage_truncated_answer(raw_text: str) -> str | None:
+    """Recover whatever of the `answer` string a truncated reply managed to write."""
+    m = _ANSWER_FIELD_RE.search(raw_text)
+    if not m:
+        return None
+    try:
+        return json.loads(f'"{m.group(1)}"')  # reuse json's own \" / \n decoding
+    except json.JSONDecodeError:
+        return m.group(1)  # best effort: whatever's there, unescaped
+
+
 def parse_query_response(
     raw_text: str, index: dict[str, dict], question: str, model: str
 ) -> Answer:
@@ -93,7 +117,19 @@ def parse_query_response(
     try:
         data = extract_json(raw_text)
     except ValueError:
-        data = extract_json(_repair_bare_citations(raw_text))
+        try:
+            data = extract_json(_repair_bare_citations(raw_text))
+        except ValueError:
+            salvaged = _salvage_truncated_answer(raw_text)
+            if salvaged is None:
+                raise
+            return Answer(
+                question=question,
+                answer=salvaged + "\n\n[reply was cut off before it finished]",
+                sufficient=False,
+                triples_shown=len(index),
+                model=model,
+            )
     if not isinstance(data, dict):
         raise ValueError("expected a JSON object")
 
@@ -173,16 +209,19 @@ def ask(
     # See openrouter.py's DEFAULT_MODELS comment: a reasoning-capable model with
     # too tight a budget spends it all on reasoning and returns nothing — hit
     # for real on `extract`, and again here as truncated JSON when a verbose,
-    # heavily-cited answer plus reasoning outran 3072. query is left able to
-    # reason (that is what keeps multi-hop answers honest instead of
-    # pattern-matched), so the fix is a wider budget, not disabling reasoning.
+    # heavily-cited answer plus reasoning outran first 3072, then 4096 (both
+    # seen truncating for real, 2026-08-30). query is left able to reason
+    # (that is what keeps multi-hop answers honest instead of pattern-matched),
+    # so the fix is a wider budget, not disabling reasoning — and
+    # parse_query_response now salvages a partial answer if this still isn't
+    # enough, rather than raising through to the caller.
     seed_names = [sub.nodes[s].name for s in seeds if s in sub.nodes]
     try:
         completion = complete(
             prompts.QUERY_SYSTEM,
             prompts.QUERY_USER.format(question=question, triples=triples),
             model,
-            max_tokens=4096,
+            max_tokens=8192,
         )
         answer = parse_query_response(completion.text, index, question, completion.model)
         answer.prompt_tokens = completion.prompt_tokens
