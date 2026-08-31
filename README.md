@@ -134,10 +134,27 @@ python web/serve.py --db work/graph.db --port 8791 --no-open
 A read-only viewer served from `work/graph.db`. Run `assemble` first. Entities appear as
 isometric structures whose height encodes degree, so the busiest entities stand tallest. A
 solid outline marks a link written by hand in Roam. A dashed outline marks a link a model
-inferred from prose. The right panel carries four tabs: Detail, [Path](docs/viewer-path.png),
-[Ask](docs/viewer-ask.png), and About. Path runs a breadth-first search in the browser over the
-graph already loaded, at no cost. Ask is the one feature in the viewer that spends a model
-call. Read `web/README.md` for the routes, the design language, and the test coverage.
+inferred from prose. The right panel carries four tabs: Detail, Path, Ask, and About. Detail
+shows what an entity says, what refers to it, and every source block behind each claim. Read
+`web/README.md` for the routes, the design language, and the test coverage.
+
+### Path — the shortest connection between two entities
+
+![The Path tab: from "AI 2027" to "working-without-externally-provided-feedback", found directly connected by a "mentions" edge, with the connecting path highlighted in accent orange across the isometric map](docs/viewer-path.png)
+
+Path runs a breadth-first search in the browser, over the graph the page already holds. The
+search makes no model call and costs nothing. Path searches the whole graph whatever the
+origin filter is set to. It switches the filter back to "all" when the filter would otherwise
+hide the path it found.
+
+### Ask — grounded question answering
+
+![The Ask tab, asked "What did I write about feedback loops in AI 2027?": the answer says the graph shows AI 2027 mentions feedback-loops-working-without-externally-provided-feedback but does not contain the actual text, flagged "graph did not have enough" and "93 triples shown", with one citation and its quoted source block including the block's full URL, wrapped rather than clipped](docs/viewer-ask.png)
+
+Ask is the one feature in the viewer that spends a model call. Ask builds an answer only from
+triples in the graph, and every claim cites the page and the block it came from. When the
+graph holds too little to answer, the reply says so and sets `sufficient: false` rather than
+padding the answer with plausible filler.
 
 ## Deployment
 
